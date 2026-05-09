@@ -14,45 +14,44 @@ export async function storeOnWalrusWithWallet(
   onStatus?: (msg: string) => void
 ): Promise<string> {
   if (!signAndExecuteAsync) {
+    // No wallet connected — fall back to publisher REST API
     onStatus?.("Storing on Walrus…");
     return storeOnWalrus(data);
   }
-  try {
-    // Step 1: server builds the register transaction using owner's WAL coins
-    onStatus?.("Preparing Walrus transaction…");
-    const regRes = await fetch("/api/walrus/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data, owner }),
-    });
-    if (!regRes.ok) {
-      const err = await regRes.json().catch(() => ({ error: "Register failed" }));
-      throw new Error(err.error || `Register failed (${regRes.status})`);
-    }
-    const { txBase64, blobId } = await regRes.json();
 
-    // Step 2: wallet signs the pre-built transaction bytes (pays WAL)
-    onStatus?.("Approve WAL payment in your wallet…");
-    const { digest } = await signAndExecuteAsync(txBase64);
+  // Wallet connected: use the on-chain WAL payment flow.
+  // Errors propagate directly so the UI shows the real failure reason.
 
-    // Step 3: server uploads slivers to Walrus storage nodes
-    onStatus?.("Uploading to Walrus storage nodes…");
-    const commitRes = await fetch("/api/walrus/commit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ data, digest }),
-    });
-    if (!commitRes.ok) {
-      const err = await commitRes.json().catch(() => ({ error: "Upload failed" }));
-      throw new Error(err.error || `Upload failed (${commitRes.status})`);
-    }
-    const result = await commitRes.json();
-    return result.blobId ?? blobId;
-  } catch (err) {
-    console.warn("[walrus] wallet flow failed, falling back to publisher:", err);
-    onStatus?.("Storing on Walrus…");
-    return storeOnWalrus(data);
+  // Step 1: server builds the register transaction using owner's WAL coins
+  onStatus?.("Preparing Walrus transaction…");
+  const regRes = await fetch("/api/walrus/register", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, owner }),
+  });
+  if (!regRes.ok) {
+    const err = await regRes.json().catch(() => ({ error: "Register failed" }));
+    throw new Error(err.error || `Register failed (${regRes.status})`);
   }
+  const { txBase64, blobId } = await regRes.json();
+
+  // Step 2: wallet signs the pre-built transaction bytes (pays WAL)
+  onStatus?.("Approve WAL payment in your wallet…");
+  const { digest } = await signAndExecuteAsync(txBase64);
+
+  // Step 3: server uploads slivers to Walrus storage nodes
+  onStatus?.("Uploading to Walrus storage nodes…");
+  const commitRes = await fetch("/api/walrus/commit", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ data, digest }),
+  });
+  if (!commitRes.ok) {
+    const err = await commitRes.json().catch(() => ({ error: "Upload failed" }));
+    throw new Error(err.error || `Upload failed (${commitRes.status})`);
+  }
+  const result = await commitRes.json();
+  return result.blobId ?? blobId;
 }
 
 export async function storeFileOnWalrus(

@@ -24,6 +24,10 @@ export async function POST(req: NextRequest) {
     const suiClient = new SuiGrpcClient({ network: WALRUS_NETWORK, baseUrl: SUI_GRPC_URL });
     const walrusClient = new WalrusClient({ network: WALRUS_NETWORK, suiClient });
 
+    // Wait for the register TX to be finalized on-chain before uploading slivers.
+    // Without this the SDK can't find the blob object from the digest.
+    await suiClient.waitForTransaction({ digest, timeout: 30_000 });
+
     const blob = new TextEncoder().encode(JSON.stringify(data));
     const flow = walrusClient.writeBlobFlow({ blob });
 
