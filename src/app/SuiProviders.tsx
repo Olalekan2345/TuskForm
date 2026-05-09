@@ -51,7 +51,10 @@ function WalletBridge() {
       },
       disconnect: () => disconnectWallet(),
       signAndExecuteAsync: async (tx: unknown) => {
-        const result = await signAndExecute({ transaction: tx as Parameters<typeof signAndExecute>[0]["transaction"] });
+        // tx is either a Transaction object or a base64 string of pre-built BCS bytes
+        const result = await signAndExecute({
+          transaction: tx as Parameters<typeof signAndExecute>[0]["transaction"],
+        });
         return { digest: result.digest };
       },
     });
