@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
-// Vercel Pro/Enterprise: extend timeout to 60 s so the parallel node writes complete.
 export const maxDuration = 60;
 
 const WALRUS_NETWORK = (process.env.WALRUS_NETWORK ?? "testnet") as "mainnet" | "testnet";
@@ -10,6 +9,26 @@ const SUI_GRPC_URL =
     ? "https://fullnode.mainnet.sui.io:443"
     : "https://fullnode.testnet.sui.io:443";
 
+// Module-level singletons — survive across requests in the same Lambda instance.
+// WASM is instantiated at module load time; caching the client also caches the
+// system state (n_shards) so encodeBlob drops from ~9 s cold to ~3 s warm.
+let _walrusClient: import("@mysten/walrus").WalrusClient | null = null;
+let _suiClient: import("@mysten/sui/grpc").SuiGrpcClient | null = null;
+
+async function getClients() {
+  if (!_suiClient || !_walrusClient) {
+    const { WalrusClient } = await import("@mysten/walrus");
+    const { SuiGrpcClient } = await import("@mysten/sui/grpc");
+    _suiClient = new SuiGrpcClient({ network: WALRUS_NETWORK, baseUrl: SUI_GRPC_URL });
+    _walrusClient = new WalrusClient({
+      network: WALRUS_NETWORK,
+      suiClient: _suiClient,
+      storageNodeClientOptions: { timeout: 8_000 },
+    });
+  }
+  return { suiClient: _suiClient!, walrusClient: _walrusClient! };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { data, digest } = await req.json();
@@ -17,21 +36,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "data and digest required" }, { status: 400 });
     }
 
-    const { WalrusClient } = await import("@mysten/walrus");
-    const { SuiGrpcClient } = await import("@mysten/sui/grpc");
+    const { suiClient, walrusClient } = await getClients();
 
-    const suiClient = new SuiGrpcClient({ network: WALRUS_NETWORK, baseUrl: SUI_GRPC_URL });
-
-    // Wait for the register TX to land on-chain so the blob object is findable.
     await suiClient.waitForTransaction({ digest, timeout: 30_000 });
-
-    const walrusClient = new WalrusClient({
-      network: WALRUS_NETWORK,
-      suiClient,
-      // Cap per-node request timeout at 8 s. Nodes run in parallel so 98 nodes
-      // still complete in ~8 s total; 30 s (default) would overflow Vercel limits.
-      storageNodeClientOptions: { timeout: 8_000 },
-    });
 
     const blob = new TextEncoder().encode(JSON.stringify(data));
     const flow = walrusClient.writeBlobFlow({ blob });
