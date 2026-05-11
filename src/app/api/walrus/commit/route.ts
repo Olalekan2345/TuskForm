@@ -1,20 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export const dynamic = "force-dynamic";
+// Vercel Pro/Enterprise: extend timeout to 60 s so the parallel node writes complete.
+export const maxDuration = 60;
 
 const WALRUS_NETWORK = (process.env.WALRUS_NETWORK ?? "testnet") as "mainnet" | "testnet";
 const SUI_GRPC_URL =
   WALRUS_NETWORK === "mainnet"
     ? "https://fullnode.mainnet.sui.io:443"
     : "https://fullnode.testnet.sui.io:443";
-
-// Publishers used as upload relays — they distribute slivers to storage nodes
-// on our behalf, avoiding direct-node connectivity issues from Vercel servers.
-const RELAY_PUBLISHERS = [
-  process.env.WALRUS_PUBLISHER_URL ?? "https://walrus-mainnet-publisher-1.staketab.org:443",
-  "https://walrus-publisher.brightlystake.com",
-  "http://walrus.globalstake.io:9000",
-].filter(Boolean);
 
 export async function POST(req: NextRequest) {
   try {
@@ -28,40 +22,23 @@ export async function POST(req: NextRequest) {
 
     const suiClient = new SuiGrpcClient({ network: WALRUS_NETWORK, baseUrl: SUI_GRPC_URL });
 
-    // Wait for the register TX to be finalized so the SDK can find the blob object.
+    // Wait for the register TX to land on-chain so the blob object is findable.
     await suiClient.waitForTransaction({ digest, timeout: 30_000 });
 
+    const walrusClient = new WalrusClient({
+      network: WALRUS_NETWORK,
+      suiClient,
+      // Cap per-node request timeout at 8 s. Nodes run in parallel so 98 nodes
+      // still complete in ~8 s total; 30 s (default) would overflow Vercel limits.
+      storageNodeClientOptions: { timeout: 8_000 },
+    });
+
     const blob = new TextEncoder().encode(JSON.stringify(data));
+    const flow = walrusClient.writeBlobFlow({ blob });
+    const encoded = await flow.encode();
+    await flow.upload({ digest });
 
-    // Try each publisher as an upload relay. The relay accepts pre-encoded slivers
-    // and distributes them to storage nodes — works where direct node connections fail.
-    for (const relayHost of RELAY_PUBLISHERS) {
-      try {
-        const walrusClient = new WalrusClient({
-          network: WALRUS_NETWORK,
-          suiClient,
-          uploadRelay: { host: relayHost, sendTip: null },
-        });
-        const flow = walrusClient.writeBlobFlow({ blob });
-        const encoded = await flow.encode();
-        await flow.upload({ digest });
-        return NextResponse.json({ blobId: encoded.blobId });
-      } catch (err) {
-        console.warn(`[commit] relay ${relayHost} failed:`, err);
-      }
-    }
-
-    // Last resort: attempt direct storage node connections
-    try {
-      const walrusClient = new WalrusClient({ network: WALRUS_NETWORK, suiClient });
-      const flow = walrusClient.writeBlobFlow({ blob });
-      const encoded = await flow.encode();
-      await flow.upload({ digest });
-      return NextResponse.json({ blobId: encoded.blobId });
-    } catch (err) {
-      console.error("[commit] direct node upload failed:", err);
-      throw err;
-    }
+    return NextResponse.json({ blobId: encoded.blobId });
   } catch (err) {
     console.error("[commit] error:", err);
     return NextResponse.json(
