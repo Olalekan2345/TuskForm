@@ -1,12 +1,13 @@
 export const WALRUS_AGGREGATOR =
   process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus.space";
 
-// Stores a JSON blob on Walrus using the user's wallet to pay WAL.
-// Steps:
-//   1. buildWalrusRegisterTx (browser SDK) → register Transaction + blobId
-//   2. signAndExecuteAsync (dapp-kit via walletStore) → tx digest
-//   3. POST /api/walrus/commit → uploads slivers to storage nodes
-// Falls back to storeOnWalrus (publisher REST API) if wallet fn not available.
+// Browser-side singleton — cached after first encode call to amortize WASM init
+let _browserWalrusClient: import("@mysten/walrus").WalrusClient | null = null;
+
+// Stores a JSON blob on Walrus entirely in the browser.
+// All WASM encoding and sliver upload happen client-side, eliminating server
+// timeout issues. Storage nodes return CORS *, so direct browser upload works.
+// Falls back to storeOnWalrus (publisher REST API) if no wallet is connected.
 export async function storeOnWalrusWithWallet(
   data: object,
   owner: string,
@@ -14,44 +15,47 @@ export async function storeOnWalrusWithWallet(
   onStatus?: (msg: string) => void
 ): Promise<string> {
   if (!signAndExecuteAsync) {
-    // No wallet connected — fall back to publisher REST API
     onStatus?.("Storing on Walrus…");
     return storeOnWalrus(data);
   }
 
-  // Wallet connected: use the on-chain WAL payment flow.
-  // Errors propagate directly so the UI shows the real failure reason.
+  const network = (process.env.NEXT_PUBLIC_WALRUS_NETWORK ?? "mainnet") as "mainnet" | "testnet";
+  const epochs = parseInt(process.env.NEXT_PUBLIC_WALRUS_EPOCHS ?? "52", 10);
+  const suiRpcUrl =
+    network === "mainnet"
+      ? "https://fullnode.mainnet.sui.io:443"
+      : "https://fullnode.testnet.sui.io:443";
 
-  // Step 1: server builds the register transaction using owner's WAL coins
+  // Step 1: encode the blob with WASM (runs in the browser, no server timeout)
+  onStatus?.("Encoding blob…");
+  if (!_browserWalrusClient) {
+    const { WalrusClient } = await import("@mysten/walrus");
+    const { SuiClient } = await import("@mysten/sui/client");
+    const suiClient = new SuiClient({ url: suiRpcUrl });
+    _browserWalrusClient = new WalrusClient({
+      network,
+      suiClient,
+      storageNodeClientOptions: { timeout: 10_000 },
+    });
+  }
+
+  const blob = new TextEncoder().encode(JSON.stringify(data));
+  const flow = _browserWalrusClient.writeBlobFlow({ blob });
+  const encoded = await flow.encode();
+
+  // Step 2: build register TX — coinWithBalance resolved by dapp-kit at sign time
   onStatus?.("Preparing Walrus transaction…");
-  const regRes = await fetch("/api/walrus/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data, owner }),
-  });
-  if (!regRes.ok) {
-    const err = await regRes.json().catch(() => ({ error: "Register failed" }));
-    throw new Error(err.error || `Register failed (${regRes.status})`);
-  }
-  const { txBase64, blobId } = await regRes.json();
+  const tx = flow.register({ owner, epochs, deletable: false });
 
-  // Step 2: wallet signs the pre-built transaction bytes (pays WAL)
+  // Step 3: wallet signs and pays WAL (dapp-kit resolves coinWithBalance)
   onStatus?.("Approve WAL payment in your wallet…");
-  const { digest } = await signAndExecuteAsync(txBase64);
+  const { digest } = await signAndExecuteAsync(tx);
 
-  // Step 3: server uploads slivers to Walrus storage nodes
+  // Step 4: upload slivers directly from the browser to storage nodes (CORS *)
   onStatus?.("Uploading to Walrus storage nodes…");
-  const commitRes = await fetch("/api/walrus/commit", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ data, digest }),
-  });
-  if (!commitRes.ok) {
-    const err = await commitRes.json().catch(() => ({ error: "Upload failed" }));
-    throw new Error(err.error || `Upload failed (${commitRes.status})`);
-  }
-  const result = await commitRes.json();
-  return result.blobId ?? blobId;
+  await flow.upload({ digest });
+
+  return encoded.blobId;
 }
 
 export async function storeFileOnWalrus(

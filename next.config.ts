@@ -15,8 +15,20 @@ const nextConfig: NextConfig = {
     "/api/walrus/commit":   ["./node_modules/@mysten/walrus-wasm/**/*"],
   },
   outputFileTracingRoot: path.join(__dirname),
-  webpack(config) {
+  webpack(config, { isServer }) {
     config.experiments = { ...config.experiments, asyncWebAssembly: true };
+    // Browser bundles: polyfill Node built-ins that may appear as transitive deps
+    if (!isServer) {
+      config.resolve = {
+        ...config.resolve,
+        fallback: {
+          ...config.resolve?.fallback,
+          crypto: false,
+          stream: false,
+          buffer: false,
+        },
+      };
+    }
     return config;
   },
 };
