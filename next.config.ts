@@ -11,8 +11,9 @@ const nextConfig: NextConfig = {
   // Explicitly include the WASM binary in each serverless function bundle
   // so Vercel's file tracer doesn't strip it from the deployment.
   outputFileTracingIncludes: {
-    "/api/walrus/register": ["./node_modules/@mysten/walrus-wasm/**/*"],
-    "/api/walrus/commit":   ["./node_modules/@mysten/walrus-wasm/**/*"],
+    "/api/walrus/register":   ["./node_modules/@mysten/walrus-wasm/**/*"],
+    "/api/walrus/commit":     ["./node_modules/@mysten/walrus-wasm/**/*"],
+    "/v1/blob-upload-relay":  ["./node_modules/@mysten/walrus-wasm/**/*"],
   },
   outputFileTracingRoot: path.join(__dirname),
   webpack(config, { isServer }) {
