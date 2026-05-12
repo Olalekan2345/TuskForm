@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 
 const WALRUS_EPOCHS = process.env.WALRUS_EPOCHS ?? "52";
 
-// Ordered list of public mainnet publishers to try in sequence.
-// StakeTab is free and requires no auth. Official publisher requires JWT on mainnet.
+// Official Mysten Labs publisher first — most reliable.
+// Community publishers as fallbacks. Env override goes to front of the list.
 const PUBLISHERS = [
-  process.env.WALRUS_PUBLISHER_URL ?? "https://walrus-mainnet-publisher-1.staketab.org:443",
-  "http://walrus.globalstake.io:9000",
-].filter(Boolean);
+  process.env.WALRUS_PUBLISHER_URL,
+  "https://publisher.walrus.space",
+  "https://walrus-mainnet-publisher-1.staketab.org:443",
+  "https://walrus.globalstake.io:9001",
+].filter(Boolean) as string[];
 
 async function tryPublisher(publisher: string, body: Uint8Array): Promise<{ blobId: string; alreadyExisted: boolean } | null> {
   try {

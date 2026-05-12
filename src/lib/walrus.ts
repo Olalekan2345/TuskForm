@@ -1,13 +1,21 @@
 export const WALRUS_AGGREGATOR =
   process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus.space";
 
-// Browser-side singleton — reused across calls to avoid re-fetching system state
+// Browser-side singleton for the relay flow — reused across calls
 let _browserWalrusClient: import("@mysten/walrus").WalrusClient | null = null;
 
-// Stores a JSON blob on Walrus entirely in the browser.
-// WASM runs client-side (no Vercel function timeout). Slivers are uploaded
-// directly to storage nodes which return Access-Control-Allow-Origin: *.
-// Falls back to storeOnWalrus (publisher REST API) if no wallet is connected.
+// Stores a JSON blob on Walrus using whichever method is available:
+//
+//   Method A — Publisher (tried first, Vercel Hobby compatible):
+//     Server proxies blob to publisher.walrus.space via PUT /v1/blobs.
+//     Fast (<5 s), no WAL from the user, works on any Vercel plan.
+//
+//   Method B — Upload Relay (fallback when publisher is down):
+//     Browser sends register TX (user pays WAL), our /v1/blob-upload-relay
+//     endpoint handles WASM encode + sliver upload, then browser certifies.
+//     Requires ~17 s server time → needs Vercel Pro (maxDuration=60).
+//
+// If neither works, the error from Method B propagates.
 export async function storeOnWalrusWithWallet(
   data: object,
   owner: string,
@@ -19,27 +27,37 @@ export async function storeOnWalrusWithWallet(
     return storeOnWalrus(data);
   }
 
+  // ── Method A: publisher proxy ──────────────────────────────────────────────
+  // Try the publisher first — it's fast and doesn't require wallet interaction
+  // beyond identity. No WAL deducted from the user.
+  try {
+    onStatus?.("Storing via Walrus publisher…");
+    const blobId = await storeOnWalrus(data);
+    return blobId;
+  } catch {
+    // Publisher is down or rate-limited — fall through to relay
+    onStatus?.("Publisher unavailable, switching to relay…");
+  }
+
+  // ── Method B: upload relay (user pays WAL) ─────────────────────────────────
+  // Only reached when every publisher in /api/walrus/store has failed.
+  // Note: the relay route needs maxDuration=60 (Vercel Pro).
   const network = (process.env.NEXT_PUBLIC_WALRUS_NETWORK ?? "mainnet") as "mainnet" | "testnet";
   const epochs = parseInt(process.env.NEXT_PUBLIC_WALRUS_EPOCHS ?? "52", 10);
   const suiRpcUrl =
     network === "mainnet"
       ? "https://fullnode.mainnet.sui.io:443"
       : "https://fullnode.testnet.sui.io:443";
+  const relayHost =
+    typeof window !== "undefined"
+      ? window.location.origin
+      : (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
 
-  // Step 1: build WalrusClient with uploadRelay so flow.encode() only computes
-  // a fast metadata hash — the relay handles full sliver encoding + upload.
-  // SuiJsonRpcClient is the browser-compatible HTTP client
-  // (@mysten/sui/client does NOT export SuiClient).
-  onStatus?.("Preparing Walrus client…");
+  onStatus?.("Preparing Walrus relay client…");
   if (!_browserWalrusClient) {
     const { WalrusClient } = await import("@mysten/walrus");
     const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
     const suiClient = new SuiJsonRpcClient({ url: suiRpcUrl });
-    // uploadRelay.host points to our own /v1/* routes — no tip required
-    const relayHost =
-      typeof window !== "undefined"
-        ? window.location.origin
-        : (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000");
     _browserWalrusClient = new WalrusClient({
       network,
       suiClient,
@@ -50,23 +68,22 @@ export async function storeOnWalrusWithWallet(
   const blob = new TextEncoder().encode(JSON.stringify(data));
   const flow = _browserWalrusClient.writeBlobFlow({ blob });
 
-  // Fast: only computes blobId + root hash — no full RS sliver generation
+  // With uploadRelay: encode() only computes metadata hash, not full slivers
   onStatus?.("Computing blob hash…");
   const encoded = await flow.encode();
 
-  // Build register TX — coinWithBalance for WAL resolved by dapp-kit at sign time
   onStatus?.("Preparing Walrus transaction…");
   const tx = flow.register({ owner, epochs, deletable: false });
 
-  // First wallet popup: user pays WAL for storage
+  // First wallet popup: pay WAL for on-chain blob registration
   onStatus?.("Approve WAL payment in your wallet…");
   const { digest } = await signAndExecuteAsync(tx);
 
-  // Relay: server encodes slivers + uploads to nodes (avoids browser CORS issues)
-  onStatus?.("Uploading to Walrus storage nodes…");
+  // Relay encodes slivers + uploads to nodes server-side (avoids CORS)
+  onStatus?.("Uploading via relay…");
   await flow.upload({ digest });
 
-  // Second wallet popup: submit BLS certificate on-chain to mark blob as certified
+  // Second wallet popup: submit BLS certificate on-chain to certify the blob
   onStatus?.("Certifying blob on-chain…");
   const certifyTx = flow.certify();
   await signAndExecuteAsync(certifyTx);
