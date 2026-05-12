@@ -58,12 +58,12 @@ export function AuthModal({ open, onClose }: AuthModalProps) {
           {step === "connect" && (
             <motion.div key="connect" initial={{ opacity:0, x:20 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:-20 }}
               style={{ padding:32 }}>
-              <div style={{ textAlign:"center", marginBottom:28 }}>
-                <div style={{ width:52, height:52, margin:"0 auto 16px" }}>
-                  <Image src="/logo.jpg" alt="TuskForm" width={52} height={52} style={{ borderRadius:14, objectFit:"cover" }} />
+              <div style={{ marginBottom:28 }}>
+                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:8 }}>
+                  <Image src="/logo.jpg" alt="TuskForm" width={36} height={36} style={{ borderRadius:10, objectFit:"cover", flexShrink:0 }} />
+                  <h2 style={{ fontSize:"1.3rem", fontWeight:800, color:"var(--ink)", margin:0 }}>Connect your wallet</h2>
                 </div>
-                <h2 style={{ fontSize:"1.3rem", fontWeight:800, color:"var(--ink)", marginBottom:6 }}>Connect your wallet</h2>
-                <p style={{ fontSize:"0.85rem", color:"var(--ink-muted)" }}>
+                <p style={{ fontSize:"0.85rem", color:"var(--ink-muted)", margin:0 }}>
                   Your Sui wallet is your identity on TuskForm. No account needed.
                 </p>
               </div>
