@@ -55,7 +55,7 @@ export async function storeOnWalrusWithWallet(
   if (!_browserWalrusClient) {
     const { WalrusClient } = await import("@mysten/walrus");
     const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
-    const suiClient = new SuiJsonRpcClient({ url: suiRpcUrl });
+    const suiClient = new SuiJsonRpcClient({ url: suiRpcUrl, network: network as "mainnet" | "testnet" });
     _browserWalrusClient = new WalrusClient({
       network,
       suiClient,

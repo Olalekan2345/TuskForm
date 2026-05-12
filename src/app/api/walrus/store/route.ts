@@ -15,7 +15,7 @@ async function tryPublisher(publisher: string, body: Uint8Array): Promise<string
     const res = await fetch(`${publisher}/v1/blobs?epochs=${WALRUS_EPOCHS}`, {
       method: "PUT",
       headers: { "Content-Type": "application/octet-stream" },
-      body,
+      body: body as unknown as BodyInit,
       signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) {

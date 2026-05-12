@@ -8,7 +8,12 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/Button";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { fetchFromWalrus } from "@/lib/walrus";
-import { hasPrivateKey, getPrivateKeyB64, decryptField, isSealedValue } from "@/lib/seal";
+import {
+  hasPrivateKey, getPrivateKeyB64, decryptField, isSealedValue,
+  isSealV3Value, isSealV2Value,
+  createAuthenticatedSessionKey, decryptFieldSeal, buildSealApprovalTx,
+} from "@/lib/seal";
+import type { SessionKey } from "@mysten/seal";
 import { formatRelativeTime } from "@/lib/utils";
 import { useWalletStore } from "@/lib/walletStore";
 import type { StoredForm, FormResponse } from "@/lib/types";
@@ -46,7 +51,8 @@ const NAV_ITEMS = [
 ];
 
 export default function DashboardPage() {
-  const address = useWalletStore(s => s.address);
+  const address                  = useWalletStore(s => s.address);
+  const signPersonalMessageAsync = useWalletStore(s => s.signPersonalMessageAsync);
   const account = address ? { address } : null;
 
   const [authOpen, setAuthOpen]   = useState(false);
@@ -71,6 +77,12 @@ export default function DashboardPage() {
   // Decrypted values for the currently selected response
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
 
+  // Seal v3 decrypt state
+  type SealDecryptState = "idle" | "signing" | "decrypting" | "done" | "error";
+  const [sealState, setSealState] = useState<SealDecryptState>("idle");
+  const [sealError, setSealError] = useState<string | null>(null);
+  const sealSessionRef = useRef<SessionKey | null>(null);
+
   const noteRef = useRef<HTMLTextAreaElement>(null);
 
   // Load persisted metadata
@@ -86,23 +98,74 @@ export default function DashboardPage() {
     setArchived(new Set(a));
   }, [address]);
 
-  // Decrypt encrypted fields — runs after filtered/sel are available via responses/selIdx deps
+  // Detect if selected response has Seal v3 encrypted fields
+  const selHasV3 = (sel: ResponseWithForm | null): boolean =>
+    sel?.responses?.some(r => r.encrypted && isSealV3Value(String(r.value))) ?? false;
+
+  // Auto-decrypt v2 (ECDH) fields when a response is selected
   const decryptSelected = (sel: ResponseWithForm | null) => {
     if (!sel?.responses?.some(r => r.encrypted)) { setDecrypted({}); return; }
+    // v2 fields: decrypt automatically if private key is on this device
     const formBlobId = sel.formId;
-    if (!hasPrivateKey(formBlobId)) { setDecrypted({}); return; }
     const privKeyB64 = getPrivateKeyB64(formBlobId);
-    if (!privKeyB64) { setDecrypted({}); return; }
-    (async () => {
-      const map: Record<string, string> = {};
+    if (privKeyB64) {
+      (async () => {
+        const map: Record<string, string> = {};
+        for (const r of sel.responses ?? []) {
+          if (r.encrypted && isSealV2Value(String(r.value))) {
+            const plain = await decryptField(String(r.value), privKeyB64);
+            if (plain !== null) map[r.fieldId] = plain;
+          }
+        }
+        setDecrypted(map);
+      })().catch(() => setDecrypted({}));
+    } else {
+      setDecrypted({});
+    }
+  };
+
+  // Decrypt all v3 (Seal) fields in the selected response using the wallet
+  const decryptV3Fields = async (sel: ResponseWithForm) => {
+    if (!address || !signPersonalMessageAsync) return;
+
+    // Get the Seal package ID: prefer env var, then fetch form schema from Walrus
+    let pkgId = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID;
+    if (!pkgId) {
+      try {
+        const schema = await fetchFromWalrus<import("@/lib/types").FormSchema>(sel.formId);
+        pkgId = schema.sealPackageId;
+      } catch { /* ignore */ }
+    }
+
+    if (!pkgId) {
+      setSealError("No Seal package ID found. Set NEXT_PUBLIC_SEAL_PACKAGE_ID.");
+      setSealState("error");
+      return;
+    }
+
+    setSealState("signing");
+    setSealError(null);
+    try {
+      // Create SessionKey and sign with wallet (opens wallet popup)
+      const sessionKey = await createAuthenticatedSessionKey(address, pkgId, signPersonalMessageAsync);
+      sealSessionRef.current = sessionKey;
+
+      setSealState("decrypting");
+      const txBytes = await buildSealApprovalTx(pkgId, address);
+
+      const map: Record<string, string> = { ...decrypted };
       for (const r of sel.responses ?? []) {
-        if (r.encrypted && isSealedValue(String(r.value))) {
-          const plain = await decryptField(String(r.value), privKeyB64);
+        if (r.encrypted && isSealV3Value(String(r.value))) {
+          const plain = await decryptFieldSeal(String(r.value), sessionKey, txBytes);
           if (plain !== null) map[r.fieldId] = plain;
         }
       }
       setDecrypted(map);
-    })().catch(() => setDecrypted({}));
+      setSealState("done");
+    } catch (err) {
+      setSealError(err instanceof Error ? err.message : "Decryption failed");
+      setSealState("error");
+    }
   };
 
   const persist = (key: string, val: unknown) => {
@@ -207,6 +270,9 @@ export default function DashboardPage() {
   // When selection changes, load note and decrypt sealed fields
   useEffect(() => {
     if (sel) { setDraftNote(notes[sel.responseBlobId] || ""); setEditingNote(false); setShowPriorityMenu(false); }
+    setSealState("idle");
+    setSealError(null);
+    sealSessionRef.current = null;
     decryptSelected(sel ?? null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.responseBlobId]);
@@ -530,13 +596,40 @@ export default function DashboardPage() {
 
                       {/* Responses */}
                       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+                        {/* Seal v3 decrypt button */}
+                        {selHasV3(sel) && !sel.responses?.every(r => !r.encrypted || decrypted[r.fieldId]) && (
+                          <div style={{ padding:"12px 16px", borderRadius:14, background:"rgba(123,45,139,0.06)", border:"1px solid rgba(123,45,139,0.2)", display:"flex", alignItems:"center", justifyContent:"space-between", gap:12 }}>
+                            <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                              <Lock size={14} color="#c084fc"/>
+                              <div>
+                                <div style={{ fontSize:"0.8rem", fontWeight:600, color:"#c084fc" }}>Sealed with Mysten Seal</div>
+                                <div style={{ fontSize:"0.7rem", color:"var(--ink-faint)", marginTop:2 }}>
+                                  {sealState === "signing" ? "Sign the message in your wallet…" :
+                                   sealState === "decrypting" ? "Fetching decryption keys…" :
+                                   sealState === "error" ? sealError :
+                                   "Sign with your wallet to decrypt these fields"}
+                                </div>
+                              </div>
+                            </div>
+                            {(sealState === "idle" || sealState === "error") && (
+                              <button onClick={() => decryptV3Fields(sel)}
+                                style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 14px", borderRadius:8, background:"rgba(123,45,139,0.15)", border:"1px solid rgba(123,45,139,0.3)", color:"#c084fc", fontSize:"0.78rem", fontWeight:600, cursor:"pointer", whiteSpace:"nowrap", flexShrink:0 }}>
+                                <Lock size={11}/> Decrypt with wallet
+                              </button>
+                            )}
+                            {(sealState === "signing" || sealState === "decrypting") && (
+                              <Loader2 size={16} color="#c084fc" style={{ animation:"spin 1s linear infinite", flexShrink:0 }}/>
+                            )}
+                          </div>
+                        )}
+
                         {sel.responses?.map(f => (
                           <div key={f.fieldId} style={{ padding:"14px 16px", borderRadius:14, background:"rgba(255,255,255,0.02)", border:`1px solid ${f.encrypted?"rgba(123,45,139,0.2)":"var(--glass-border)"}` }}>
                             <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
                               <span style={{ fontSize:"0.7rem", fontWeight:600, color:"var(--ink-muted)", textTransform:"uppercase", letterSpacing:"0.06em" }}>{f.fieldLabel}</span>
                               {f.encrypted && (
                                 <span style={{ display:"flex", alignItems:"center", gap:4, fontSize:"0.68rem", color:"#c084fc", background:"rgba(123,45,139,0.1)", border:"1px solid rgba(123,45,139,0.2)", padding:"2px 7px", borderRadius:20 }}>
-                                  <Lock size={9}/> Sealed
+                                  <Lock size={9}/> {isSealV3Value(String(f.value)) ? "Seal v3" : "Sealed"}
                                 </span>
                               )}
                             </div>
@@ -548,7 +641,11 @@ export default function DashboardPage() {
                                   <div style={{ display:"flex", alignItems:"flex-start", gap:6, padding:"8px 10px", borderRadius:8, background:"rgba(123,45,139,0.06)", border:"1px solid rgba(123,45,139,0.15)" }}>
                                     <Lock size={11} color="#c084fc" style={{ marginTop:1, flexShrink:0 }}/>
                                     <span style={{ fontSize:"0.7rem", color:"var(--ink-muted)", lineHeight:1.5 }}>
-                                      {sel && hasPrivateKey(sel.formId) ? "Decrypting…" : "Sealed · only accessible on the device that created this form"}
+                                      {isSealV3Value(String(f.value))
+                                        ? "Click \"Decrypt with wallet\" above to reveal"
+                                        : hasPrivateKey(sel.formId)
+                                          ? "Decrypting…"
+                                          : "Sealed · only accessible on the device that created this form"}
                                     </span>
                                   </div>
                                 )}

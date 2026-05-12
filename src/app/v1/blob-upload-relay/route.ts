@@ -84,10 +84,12 @@ export async function POST(req: NextRequest) {
       throw lastError ?? new Error("All upload attempts failed");
     }
 
-    // Build BLS aggregate certificate from node confirmations
+    // Build BLS aggregate certificate from node confirmations.
+    // blobObjectId is only used for deletable blobs; pass blobId as a no-op placeholder.
     const certificate = await walrusClient.certificateFromConfirmations({
       confirmations,
       blobId,
+      blobObjectId: req.nextUrl.searchParams.get("deletable_blob_object") ?? blobId,
       deletable: false,
     });
 

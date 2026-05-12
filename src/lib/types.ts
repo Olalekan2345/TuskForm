@@ -21,7 +21,8 @@ export interface FormSchema {
   createdBy: string;
   createdAt: number;
   version: 1;
-  encryptionPublicKey?: string; // ECDH P-256 public key (base64) for field encryption
+  encryptionPublicKey?: string; // ECDH P-256 public key (base64) for field encryption (v2 / legacy)
+  sealPackageId?: string;       // Deployed address_gate package ID for Seal v3 threshold encryption
 }
 
 export interface FieldResponse {

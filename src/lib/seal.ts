@@ -1,18 +1,59 @@
-// TuskForm encryption layer — ECIES (ECDH P-256 + AES-256-GCM)
+// TuskForm encryption layer
 //
-// Form creator generates an ECDH key pair at form-creation time.
-// Public key is embedded in the form schema (stored on Walrus, readable by anyone).
-// Private key stays in localStorage on the creator's device only.
+// v2 (ECIES): legacy — ECDH P-256 + AES-256-GCM, private key in localStorage.
+//   Used for forms that were created without a Seal package ID.
+//   Format: "seal:v2:<base64(ephPub[65] + iv[12] + ciphertext)>"
 //
-// Respondents encrypt fields using the public key from the form schema.
-// Only the creator can decrypt using their private key.
-//
-// Encrypted value format: "seal:v2:<base64(ephPub[65] + iv[12] + ciphertext)>"
+// v3 (Seal): real Mysten Seal threshold IBE encryption.
+//   The encrypted object is stored as BCS bytes and base64-encoded.
+//   Only the creator can decrypt by presenting a valid seal_approve transaction.
+//   Format: "seal:v3:<base64(encryptedObject)>"
+
+import { SealClient, SessionKey } from "@mysten/seal";
+import { SuiJsonRpcClient, getJsonRpcFullnodeUrl } from "@mysten/sui/jsonRpc";
+import { Transaction } from "@mysten/sui/transactions";
+
+// ── Network / key server config ──────────────────────────────────────────────
 
 export const SEAL_NETWORK = "mainnet";
 
-export function isEncryptedField(privacy: "public" | "encrypted" | "admin_only"): boolean {
-  return privacy === "encrypted" || privacy === "admin_only";
+// Known Seal mainnet key servers (independent, weight 1 each).
+// Override via NEXT_PUBLIC_SEAL_SERVER_* env vars.
+const DEFAULT_SERVER_1 = "0x1afb3a57211ceff8f6781757821847e3ddae73f64e78ec8cd9349914ad985475";
+const DEFAULT_SERVER_2 = "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2";
+
+function getSealServerConfigs() {
+  const s1 = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SEAL_SERVER_1) || DEFAULT_SERVER_1;
+  const s2 = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SEAL_SERVER_2) || DEFAULT_SERVER_2;
+  return [
+    { objectId: s1, weight: 1 },
+    { objectId: s2, weight: 1 },
+  ];
+}
+
+// Lazy singleton SuiJsonRpcClient (client-side only)
+let _suiClient: SuiJsonRpcClient | null = null;
+function getSuiClient(): SuiJsonRpcClient {
+  if (!_suiClient) {
+    _suiClient = new SuiJsonRpcClient({
+      network: "mainnet",
+      url: getJsonRpcFullnodeUrl("mainnet"),
+    });
+  }
+  return _suiClient;
+}
+
+// Lazy singleton SealClient (client-side only)
+let _sealClient: SealClient | null = null;
+export function getSealClient(): SealClient {
+  if (!_sealClient) {
+    _sealClient = new SealClient({
+      suiClient: getSuiClient(),
+      serverConfigs: getSealServerConfigs(),
+      verifyKeyServers: false, // Skip until we know server keys are stable
+    });
+  }
+  return _sealClient;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -21,19 +62,150 @@ function toB64(buf: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(buf)));
 }
 
-function fromB64(b64: string): Uint8Array {
-  return Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+function fromB64(b64: string): Uint8Array<ArrayBuffer> {
+  const raw = atob(b64);
+  const buf = new ArrayBuffer(raw.length);
+  const arr = new Uint8Array(buf);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
 }
 
-const PRIV_PREFIX = "tuskform_ecdhpriv_";
-const ENC_PREFIX  = "seal:v2:";
+function hexToBytes(hex: string): Uint8Array {
+  const h = hex.startsWith("0x") ? hex.slice(2) : hex;
+  const result = new Uint8Array(h.length / 2);
+  for (let i = 0; i < h.length; i += 2) {
+    result[i / 2] = parseInt(h.slice(i, i + 2), 16);
+  }
+  return result;
+}
 
-// ── Creator key management ────────────────────────────────────────────────────
+// ── Value-format detection ────────────────────────────────────────────────────
+
+const V2_PREFIX = "seal:v2:";
+const V3_PREFIX = "seal:v3:";
+
+export function isSealedValue(value: string): boolean {
+  return typeof value === "string" && (value.startsWith(V2_PREFIX) || value.startsWith(V3_PREFIX));
+}
+
+export function isSealV3Value(value: string): boolean {
+  return typeof value === "string" && value.startsWith(V3_PREFIX);
+}
+
+export function isSealV2Value(value: string): boolean {
+  return typeof value === "string" && value.startsWith(V2_PREFIX);
+}
+
+export function isEncryptedField(privacy: "public" | "encrypted" | "admin_only"): boolean {
+  return privacy === "encrypted" || privacy === "admin_only";
+}
+
+// ── v3 Seal encryption (respondent side) ─────────────────────────────────────
 
 /**
- * Generates an ECDH P-256 key pair for a form.
- * Stores the private key in localStorage. Returns the public key (goes in form schema).
+ * Encrypts plaintext using Mysten Seal threshold IBE.
+ * Identity = creator's Sui address (32-byte hex, no 0x).
+ * Returns "seal:v3:<base64(encryptedObject)>".
  */
+export async function encryptFieldSeal(
+  plaintext: string,
+  creatorAddress: string,
+  packageId: string,
+): Promise<string> {
+  const sealClient = getSealClient();
+  const id = creatorAddress.startsWith("0x") ? creatorAddress.slice(2) : creatorAddress;
+  const data = new TextEncoder().encode(plaintext);
+
+  const { encryptedObject } = await sealClient.encrypt({
+    threshold: 2,
+    packageId,
+    id,
+    data,
+  });
+
+  return V3_PREFIX + toB64(encryptedObject.buffer as ArrayBuffer);
+}
+
+// ── v3 Seal approval transaction ──────────────────────────────────────────────
+
+/**
+ * Builds the transaction bytes that call address_gate::seal_approve.
+ * The Seal key servers simulate this to verify the caller is the creator.
+ */
+export async function buildSealApprovalTx(
+  packageId: string,
+  creatorAddress: string,
+): Promise<Uint8Array> {
+  const idBytes = hexToBytes(creatorAddress);
+  const tx = new Transaction();
+  tx.moveCall({
+    target: `${packageId}::address_gate::seal_approve`,
+    arguments: [tx.pure.vector("u8", Array.from(idBytes))],
+  });
+  // Build only the transaction kind bytes (no gas needed for simulation)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return tx.build({ client: getSuiClient() as any, onlyTransactionKind: true });
+}
+
+// ── v3 Seal decryption (creator dashboard) ────────────────────────────────────
+
+/**
+ * Creates and authenticates a SessionKey.
+ * Returns the SessionKey after the user signs the personal message.
+ * `signPersonalMessage(bytes)` should call the wallet adapter's signPersonalMessage.
+ */
+export async function createAuthenticatedSessionKey(
+  creatorAddress: string,
+  packageId: string,
+  signPersonalMessage: (bytes: Uint8Array) => Promise<{ signature: string }>,
+): Promise<SessionKey> {
+  const sessionKey = await SessionKey.create({
+    address: creatorAddress,
+    packageId,
+    ttlMin: 10,
+    suiClient: getSuiClient(),
+  });
+
+  const message = sessionKey.getPersonalMessage();
+  const { signature } = await signPersonalMessage(message);
+  await sessionKey.setPersonalMessageSignature(signature);
+
+  return sessionKey;
+}
+
+/**
+ * Decrypts a "seal:v3:…" ciphertext using the creator's authenticated SessionKey.
+ * Returns the decrypted plaintext, or null on failure.
+ */
+export async function decryptFieldSeal(
+  ciphertext: string,
+  sessionKey: SessionKey,
+  txBytes: Uint8Array,
+): Promise<string | null> {
+  if (!ciphertext.startsWith(V3_PREFIX)) return null;
+  try {
+    const encrypted = fromB64(ciphertext.slice(V3_PREFIX.length));
+    const plain = await getSealClient().decrypt({ data: encrypted, sessionKey, txBytes });
+    return new TextDecoder().decode(plain);
+  } catch {
+    return null;
+  }
+}
+
+// ── v2 ECIES (legacy / fallback) ─────────────────────────────────────────────
+
+const PRIV_PREFIX = "tuskform_ecdhpriv_";
+
+export function hasPrivateKey(formBlobId: string): boolean {
+  if (typeof window === "undefined") return false;
+  return !!localStorage.getItem(PRIV_PREFIX + formBlobId);
+}
+
+export function getPrivateKeyB64(formBlobId: string): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(PRIV_PREFIX + formBlobId);
+}
+
 export async function generateFormKeyPair(formBlobId: string): Promise<string> {
   if (typeof window === "undefined") throw new Error("Keys are client-only");
   const kp = await crypto.subtle.generateKey(
@@ -46,42 +218,20 @@ export async function generateFormKeyPair(formBlobId: string): Promise<string> {
     crypto.subtle.exportKey("pkcs8", kp.privateKey),
   ]);
   localStorage.setItem(PRIV_PREFIX + formBlobId, toB64(privPkcs8));
-  return toB64(pubRaw); // public key — stored in form schema
+  return toB64(pubRaw);
 }
 
-/** Returns true if the creator's private key is available on this device. */
-export function hasPrivateKey(formBlobId: string): boolean {
-  if (typeof window === "undefined") return false;
-  return !!localStorage.getItem(PRIV_PREFIX + formBlobId);
-}
-
-/** Retrieves the private key base64 from localStorage. */
-export function getPrivateKeyB64(formBlobId: string): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(PRIV_PREFIX + formBlobId);
-}
-
-// ── Encryption (respondent side) ──────────────────────────────────────────────
-
-/**
- * Encrypts plaintext using the form's public key (from the form schema).
- * Uses ECIES: ephemeral ECDH key exchange + AES-256-GCM.
- */
 export async function encryptField(plaintext: string, publicKeyB64: string): Promise<string> {
   const creatorPub = await crypto.subtle.importKey(
     "raw", fromB64(publicKeyB64),
     { name: "ECDH", namedCurve: "P-256" },
     false, []
   );
-
-  // Ephemeral key pair for this encryption
   const ephKP = await crypto.subtle.generateKey(
     { name: "ECDH", namedCurve: "P-256" },
     true, ["deriveBits"]
   );
   const ephPubRaw = await crypto.subtle.exportKey("raw", ephKP.publicKey);
-
-  // Derive shared AES key via ECDH
   const sharedBits = await crypto.subtle.deriveBits(
     { name: "ECDH", public: creatorPub },
     ephKP.privateKey, 256
@@ -89,37 +239,26 @@ export async function encryptField(plaintext: string, publicKeyB64: string): Pro
   const aesKey = await crypto.subtle.importKey(
     "raw", sharedBits, { name: "AES-GCM" }, false, ["encrypt"]
   );
-
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv },
     aesKey,
     new TextEncoder().encode(plaintext)
   );
-
-  // Pack: ephPub (65 bytes) | iv (12 bytes) | ciphertext
   const payload = new Uint8Array(65 + 12 + ct.byteLength);
   payload.set(new Uint8Array(ephPubRaw), 0);
   payload.set(iv, 65);
   payload.set(new Uint8Array(ct), 77);
-
-  return ENC_PREFIX + toB64(payload.buffer);
+  return V2_PREFIX + toB64(payload.buffer as ArrayBuffer);
 }
 
-// ── Decryption (creator dashboard) ───────────────────────────────────────────
-
-/**
- * Decrypts a "seal:v2:…" value using the creator's private key (from localStorage).
- * Returns null on failure (wrong key, corrupted data, etc).
- */
 export async function decryptField(ciphertext: string, privateKeyB64: string): Promise<string | null> {
-  if (!ciphertext.startsWith(ENC_PREFIX)) return null;
+  if (!ciphertext.startsWith(V2_PREFIX)) return null;
   try {
-    const payload    = fromB64(ciphertext.slice(ENC_PREFIX.length));
+    const payload     = fromB64(ciphertext.slice(V2_PREFIX.length));
     const ephPubBytes = payload.slice(0, 65);
     const iv          = payload.slice(65, 77);
     const ct          = payload.slice(77);
-
     const creatorPriv = await crypto.subtle.importKey(
       "pkcs8", fromB64(privateKeyB64),
       { name: "ECDH", namedCurve: "P-256" },
@@ -130,7 +269,6 @@ export async function decryptField(ciphertext: string, privateKeyB64: string): P
       { name: "ECDH", namedCurve: "P-256" },
       false, []
     );
-
     const sharedBits = await crypto.subtle.deriveBits(
       { name: "ECDH", public: ephPub },
       creatorPriv, 256
@@ -138,7 +276,6 @@ export async function decryptField(ciphertext: string, privateKeyB64: string): P
     const aesKey = await crypto.subtle.importKey(
       "raw", sharedBits, { name: "AES-GCM" }, false, ["decrypt"]
     );
-
     const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, aesKey, ct);
     return new TextDecoder().decode(plain);
   } catch {
@@ -146,15 +283,7 @@ export async function decryptField(ciphertext: string, privateKeyB64: string): P
   }
 }
 
-/** Returns true if a value is a sealed ciphertext. */
-export function isSealedValue(value: string): boolean {
-  return typeof value === "string" && value.startsWith(ENC_PREFIX);
-}
-
-// ── Legacy shim (v1 AES keys stored in localStorage) ─────────────────────────
-// Forms created before this update used a symmetric AES key in localStorage.
-// Those responses will show as unreadable — a re-submission is needed.
-// Kept here so hasFormKey() doesn't crash existing code paths.
+// ── Legacy shims ──────────────────────────────────────────────────────────────
 
 const LEGACY_PREFIX = "tuskform_formkey_";
 
@@ -163,7 +292,6 @@ export function hasFormKey(formBlobId: string): boolean {
   return hasPrivateKey(formBlobId) || !!localStorage.getItem(LEGACY_PREFIX + formBlobId);
 }
 
-export async function registerFormKey(formBlobId: string): Promise<void> {
-  // No-op: key pair is now generated in generateFormKeyPair() called from the builder.
-  // Kept to avoid import errors in any code that still calls this.
+export async function registerFormKey(_formBlobId: string): Promise<void> {
+  // No-op: replaced by generateFormKeyPair / sealPackageId in builder
 }

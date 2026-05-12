@@ -98,12 +98,23 @@ export default function BuilderPage() {
     setSaving(true);
     setSaveError(null);
     try {
-      // Generate a temporary blobId placeholder to key the ECDH pair,
-      // then replace with the real blobId after Walrus storage.
-      const tempId = generateId();
-      const encryptionPublicKey = fields.some(f => f.privacy !== "public")
-        ? await generateFormKeyPair(tempId)
-        : undefined;
+      const hasEncryptedFields = fields.some(f => f.privacy !== "public");
+      const sealPkgId = process.env.NEXT_PUBLIC_SEAL_PACKAGE_ID;
+
+      // Use Seal v3 if package is configured, otherwise fall back to ECDH v2
+      let encryptionPublicKey: string | undefined;
+      let sealPackageId: string | undefined;
+      let tempId: string | undefined;
+
+      if (hasEncryptedFields) {
+        if (sealPkgId) {
+          sealPackageId = sealPkgId;
+        } else {
+          // v2 ECDH fallback
+          tempId = generateId();
+          encryptionPublicKey = await generateFormKeyPair(tempId);
+        }
+      }
 
       const schema: FormSchema = {
         id: generateId(),
@@ -114,11 +125,12 @@ export default function BuilderPage() {
         createdAt: Date.now(),
         version: 1,
         encryptionPublicKey,
+        sealPackageId,
       };
       const blobId = await storeOnWalrusWithWallet(schema, address, signAndExecuteAsync, setSaveStatus);
 
-      // Move the private key from tempId → real blobId in localStorage
-      if (encryptionPublicKey) {
+      // Move the private key from tempId → real blobId in localStorage (v2 only)
+      if (encryptionPublicKey && tempId) {
         const priv = localStorage.getItem(`tuskform_ecdhpriv_${tempId}`);
         if (priv) {
           localStorage.setItem(`tuskform_ecdhpriv_${blobId}`, priv);

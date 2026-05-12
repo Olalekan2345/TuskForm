@@ -13,6 +13,7 @@ import {
   useConnectWallet,
   useDisconnectWallet,
   useSignAndExecuteTransaction,
+  useSignPersonalMessage,
 } from "@mysten/dapp-kit";
 import { useWalletStore } from "@/lib/walletStore";
 
@@ -30,7 +31,8 @@ function WalletBridge() {
   const wallets      = useWallets();
   const { mutate: connectWallet }    = useConnectWallet();
   const { mutate: disconnectWallet } = useDisconnectWallet();
-  const { mutateAsync: signAndExecute } = useSignAndExecuteTransaction();
+  const { mutateAsync: signAndExecute }    = useSignAndExecuteTransaction();
+  const { mutateAsync: signPersonalMsg }   = useSignPersonalMessage();
   const _set = useWalletStore(s => s._set);
 
   useEffect(() => {
@@ -51,14 +53,17 @@ function WalletBridge() {
       },
       disconnect: () => disconnectWallet(),
       signAndExecuteAsync: async (tx: unknown) => {
-        // tx is either a Transaction object or a base64 string of pre-built BCS bytes
         const result = await signAndExecute({
           transaction: tx as Parameters<typeof signAndExecute>[0]["transaction"],
         });
         return { digest: result.digest };
       },
+      signPersonalMessageAsync: async (message: Uint8Array) => {
+        const result = await signPersonalMsg({ message });
+        return { signature: result.signature };
+      },
     });
-  }, [wallets, connectWallet, disconnectWallet, signAndExecute, _set]);
+  }, [wallets, connectWallet, disconnectWallet, signAndExecute, signPersonalMsg, _set]);
 
   return null;
 }

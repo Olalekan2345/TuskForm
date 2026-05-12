@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { fetchFromWalrus, storeOnWalrus, storeFileOnWalrus } from "@/lib/walrus";
-import { isEncryptedField, encryptField } from "@/lib/seal";
+import { isEncryptedField, encryptField, encryptFieldSeal } from "@/lib/seal";
 import { Button } from "@/components/ui/Button";
 import type { FormSchema, FormResponse, FieldResponse } from "@/lib/types";
 import {
@@ -111,14 +111,24 @@ export default function FormViewerPage() {
     if (!schema) return;
     setSubmitting(true);
     try {
-      const pubKey = schema.encryptionPublicKey;
       const responses: FieldResponse[] = await Promise.all(
         schema.fields.map(async f => {
           const raw = answers[f.id] ?? "";
-          const shouldEncrypt = isEncryptedField(f.privacy) && raw !== "" && !!pubKey;
-          const value = shouldEncrypt
-            ? await encryptField(String(raw), pubKey!)
-            : String(raw);
+          const shouldEncrypt = isEncryptedField(f.privacy) && raw !== "";
+          let value: string;
+          if (shouldEncrypt) {
+            if (schema.sealPackageId) {
+              // v3: Seal threshold IBE
+              value = await encryptFieldSeal(String(raw), schema.createdBy, schema.sealPackageId);
+            } else if (schema.encryptionPublicKey) {
+              // v2: ECDH fallback
+              value = await encryptField(String(raw), schema.encryptionPublicKey);
+            } else {
+              value = String(raw); // No encryption key — store plaintext
+            }
+          } else {
+            value = String(raw);
+          }
           return { fieldId: f.id, fieldLabel: f.label, fieldType: f.type, value, encrypted: isEncryptedField(f.privacy) };
         })
       );
