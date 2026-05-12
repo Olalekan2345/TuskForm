@@ -21,6 +21,7 @@ export interface FormSchema {
   createdBy: string;
   createdAt: number;
   version: 1;
+  encryptionPublicKey?: string; // ECDH P-256 public key (base64) for field encryption
 }
 
 export interface FieldResponse {

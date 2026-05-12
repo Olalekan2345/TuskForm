@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import { fetchFromWalrus, storeOnWalrus, storeFileOnWalrus } from "@/lib/walrus";
-import { isEncryptedField, encryptField, getFormKey } from "@/lib/seal";
+import { isEncryptedField, encryptField } from "@/lib/seal";
 import { Button } from "@/components/ui/Button";
 import type { FormSchema, FormResponse, FieldResponse } from "@/lib/types";
 import {
@@ -111,13 +111,13 @@ export default function FormViewerPage() {
     if (!schema) return;
     setSubmitting(true);
     try {
-      const formKey = await getFormKey(blobId);
+      const pubKey = schema.encryptionPublicKey;
       const responses: FieldResponse[] = await Promise.all(
         schema.fields.map(async f => {
           const raw = answers[f.id] ?? "";
-          const shouldEncrypt = isEncryptedField(f.privacy) && raw !== "";
+          const shouldEncrypt = isEncryptedField(f.privacy) && raw !== "" && !!pubKey;
           const value = shouldEncrypt
-            ? await encryptField(String(raw), formKey)
+            ? await encryptField(String(raw), pubKey!)
             : String(raw);
           return { fieldId: f.id, fieldLabel: f.label, fieldType: f.type, value, encrypted: isEncryptedField(f.privacy) };
         })

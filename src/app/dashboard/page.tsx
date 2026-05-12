@@ -8,7 +8,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Button } from "@/components/ui/Button";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { fetchFromWalrus } from "@/lib/walrus";
-import { hasFormKey, getFormKey, decryptField, isSealedValue } from "@/lib/seal";
+import { hasPrivateKey, getPrivateKeyB64, decryptField, isSealedValue } from "@/lib/seal";
 import { formatRelativeTime } from "@/lib/utils";
 import { useWalletStore } from "@/lib/walletStore";
 import type { StoredForm, FormResponse } from "@/lib/types";
@@ -90,17 +90,19 @@ export default function DashboardPage() {
   const decryptSelected = (sel: ResponseWithForm | null) => {
     if (!sel?.responses?.some(r => r.encrypted)) { setDecrypted({}); return; }
     const formBlobId = sel.formId;
-    if (!hasFormKey(formBlobId)) { setDecrypted({}); return; }
-    getFormKey(formBlobId).then(async key => {
+    if (!hasPrivateKey(formBlobId)) { setDecrypted({}); return; }
+    const privKeyB64 = getPrivateKeyB64(formBlobId);
+    if (!privKeyB64) { setDecrypted({}); return; }
+    (async () => {
       const map: Record<string, string> = {};
       for (const r of sel.responses ?? []) {
         if (r.encrypted && isSealedValue(String(r.value))) {
-          const plain = await decryptField(String(r.value), key);
+          const plain = await decryptField(String(r.value), privKeyB64);
           if (plain !== null) map[r.fieldId] = plain;
         }
       }
       setDecrypted(map);
-    }).catch(() => setDecrypted({}));
+    })().catch(() => setDecrypted({}));
   };
 
   const persist = (key: string, val: unknown) => {
@@ -546,7 +548,7 @@ export default function DashboardPage() {
                                   <div style={{ display:"flex", alignItems:"flex-start", gap:6, padding:"8px 10px", borderRadius:8, background:"rgba(123,45,139,0.06)", border:"1px solid rgba(123,45,139,0.15)" }}>
                                     <Lock size={11} color="#c084fc" style={{ marginTop:1, flexShrink:0 }}/>
                                     <span style={{ fontSize:"0.7rem", color:"var(--ink-muted)", lineHeight:1.5 }}>
-                                      {sel && hasFormKey(sel.formId) ? "Decrypting…" : "Sealed · only accessible on the device that created this form"}
+                                      {sel && hasPrivateKey(sel.formId) ? "Decrypting…" : "Sealed · only accessible on the device that created this form"}
                                     </span>
                                   </div>
                                 )}

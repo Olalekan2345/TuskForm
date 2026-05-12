@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/Button";
 import { AuthModal } from "@/components/auth/AuthModal";
 import { generateId } from "@/lib/utils";
 import { storeOnWalrusWithWallet, fetchFromWalrus } from "@/lib/walrus";
-import { registerFormKey } from "@/lib/seal";
+import { generateFormKeyPair } from "@/lib/seal";
 import { useWalletStore } from "@/lib/walletStore";
 import type { FormSchema, StoredForm } from "@/lib/types";
 import {
@@ -98,6 +98,13 @@ export default function BuilderPage() {
     setSaving(true);
     setSaveError(null);
     try {
+      // Generate a temporary blobId placeholder to key the ECDH pair,
+      // then replace with the real blobId after Walrus storage.
+      const tempId = generateId();
+      const encryptionPublicKey = fields.some(f => f.privacy !== "public")
+        ? await generateFormKeyPair(tempId)
+        : undefined;
+
       const schema: FormSchema = {
         id: generateId(),
         title,
@@ -106,10 +113,18 @@ export default function BuilderPage() {
         createdBy: address,
         createdAt: Date.now(),
         version: 1,
+        encryptionPublicKey,
       };
       const blobId = await storeOnWalrusWithWallet(schema, address, signAndExecuteAsync, setSaveStatus);
-      // Register encryption key for this form so creator can decrypt responses
-      await registerFormKey(blobId);
+
+      // Move the private key from tempId → real blobId in localStorage
+      if (encryptionPublicKey) {
+        const priv = localStorage.getItem(`tuskform_ecdhpriv_${tempId}`);
+        if (priv) {
+          localStorage.setItem(`tuskform_ecdhpriv_${blobId}`, priv);
+          localStorage.removeItem(`tuskform_ecdhpriv_${tempId}`);
+        }
+      }
       const key = `tuskform_forms_${address}`;
       const existing: StoredForm[] = JSON.parse(localStorage.getItem(key) || "[]");
       const storedForm: StoredForm = { blobId, title, description: desc, createdAt: schema.createdAt, owner: address };
