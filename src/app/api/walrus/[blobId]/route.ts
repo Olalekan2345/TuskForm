@@ -1,9 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const AGGREGATORS = [
-  process.env.WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus.space",
+  process.env.WALRUS_AGGREGATOR_URL,
+  "https://aggregator.walrus-mainnet.walrus.space",
   "https://walrus-mainnet-aggregator-1.staketab.org:443",
-].filter(Boolean);
+  "https://walrus.globalstake.io:9000",
+  "https://walrus-mainnet.nodeinfra.com",
+  "https://walrus.bwarelabs.com",
+].filter((v, i, a) => v && a.indexOf(v) === i) as string[]; // dedupe
+
+async function tryAggregator(aggregator: string, blobId: string): Promise<Response | null> {
+  try {
+    const res = await fetch(`${aggregator}/v1/blobs/${blobId}`, {
+      headers: { Accept: "application/octet-stream" },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (res.ok) return res;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 export async function GET(
   _req: NextRequest,
@@ -12,26 +31,32 @@ export async function GET(
   try {
     const { blobId } = await params;
 
-    for (const aggregator of AGGREGATORS) {
-      try {
-        const res = await fetch(`${aggregator}/v1/blobs/${blobId}`, {
-          headers: { Accept: "application/octet-stream" },
-          signal: AbortSignal.timeout(20_000),
-        });
-        if (!res.ok) continue;
+    // Try all aggregators. If all return 404, wait and retry twice —
+    // blobs sometimes take 5-10s to propagate after certification.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await sleep(attempt * 3_000);
+
+      for (const aggregator of AGGREGATORS) {
+        const res = await tryAggregator(aggregator, blobId);
+        if (!res) continue;
+
         const bytes = await res.arrayBuffer();
         const text = Buffer.from(bytes).toString("utf-8");
         try {
           return NextResponse.json(JSON.parse(text));
         } catch {
-          return new NextResponse(text, { status: 200, headers: { "Content-Type": "text/plain" } });
+          return new NextResponse(text, {
+            status: 200,
+            headers: { "Content-Type": "text/plain" },
+          });
         }
-      } catch {
-        continue;
       }
     }
 
-    return NextResponse.json({ error: "Blob not found on Walrus" }, { status: 404 });
+    return NextResponse.json(
+      { error: `Walrus fetch failed (404) for blob: ${blobId}` },
+      { status: 404 }
+    );
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },

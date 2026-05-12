@@ -22,11 +22,14 @@ async function getClients() {
     _walrusClient = new WalrusClient({
       network: WALRUS_NETWORK,
       suiClient: _suiClient,
-      storageNodeClientOptions: { timeout: 8_000 },
+      // Per-node timeout: long enough for slow nodes but keeps total relay time under 60s
+      storageNodeClientOptions: { timeout: 12_000 },
     });
   }
   return { walrusClient: _walrusClient! };
 }
+
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 // Walrus SDK relay protocol: POST /v1/blob-upload-relay?blob_id=<id>
 // The browser sends the raw blob bytes after the user has signed the register TX.
@@ -50,13 +53,36 @@ export async function POST(req: NextRequest) {
     // Full RS erasure encoding — the heavy WASM step
     const encoded = await walrusClient.encodeBlob(blobBytes);
 
-    // Upload slivers in parallel to all storage nodes (server-to-node, no CORS)
-    const confirmations = await walrusClient.writeEncodedBlobToNodes({
-      blobId,
-      metadata: encoded.metadata,
-      sliversByNode: encoded.sliversByNode,
-      deletable: false,
-    });
+    // Wait for register TX to propagate to storage nodes before writing slivers.
+    // The SDK confirms the TX before calling this relay, but storage nodes need
+    // a few seconds to index it before accepting sliver writes.
+    await sleep(4_000);
+
+    // Upload slivers with retry — nodes may still be catching up after propagation.
+    let confirmations: Awaited<ReturnType<typeof walrusClient.writeEncodedBlobToNodes>>;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        confirmations = await walrusClient.writeEncodedBlobToNodes({
+          blobId,
+          metadata: encoded.metadata,
+          sliversByNode: encoded.sliversByNode,
+          deletable: false,
+        });
+        break;
+      } catch (err) {
+        lastError = err;
+        console.warn(`[blob-upload-relay] attempt ${attempt} failed:`, err instanceof Error ? err.message : err);
+        if (attempt < 2) {
+          // Brief pause before retry to let nodes settle
+          await sleep(3_000);
+        }
+      }
+    }
+
+    if (!confirmations!) {
+      throw lastError ?? new Error("All upload attempts failed");
+    }
 
     // Build BLS aggregate certificate from node confirmations
     const certificate = await walrusClient.certificateFromConfirmations({

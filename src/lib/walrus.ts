@@ -1,19 +1,18 @@
 export const WALRUS_AGGREGATOR =
-  process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus.space";
+  process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus-mainnet.walrus.space";
 
 // Browser-side singleton for the relay flow — reused across calls
 let _browserWalrusClient: import("@mysten/walrus").WalrusClient | null = null;
 
 // Stores a JSON blob on Walrus using whichever method is available:
 //
-//   Method A — Publisher (tried first, Vercel Hobby compatible):
-//     Server proxies blob to publisher.walrus.space via PUT /v1/blobs.
-//     Fast (<5 s), no WAL from the user, works on any Vercel plan.
+//   Method A — Publisher (tried first, fast):
+//     Server proxies blob to publisher via PUT /v1/blobs.
+//     Fast (<5 s), no WAL from the user.
 //
 //   Method B — Upload Relay (fallback when publisher is down):
 //     Browser sends register TX (user pays WAL), our /v1/blob-upload-relay
 //     endpoint handles WASM encode + sliver upload, then browser certifies.
-//     Requires ~17 s server time → needs Vercel Pro (maxDuration=60).
 //
 // If neither works, the error from Method B propagates.
 export async function storeOnWalrusWithWallet(
@@ -41,7 +40,6 @@ export async function storeOnWalrusWithWallet(
 
   // ── Method B: upload relay (user pays WAL) ─────────────────────────────────
   // Only reached when every publisher in /api/walrus/store has failed.
-  // Note: the relay route needs maxDuration=60 (Vercel Pro).
   const network = (process.env.NEXT_PUBLIC_WALRUS_NETWORK ?? "mainnet") as "mainnet" | "testnet";
   const epochs = parseInt(process.env.NEXT_PUBLIC_WALRUS_EPOCHS ?? "52", 10);
   const suiRpcUrl =
@@ -61,7 +59,7 @@ export async function storeOnWalrusWithWallet(
     _browserWalrusClient = new WalrusClient({
       network,
       suiClient,
-      uploadRelay: { host: relayHost },
+      uploadRelay: { host: relayHost, timeout: 55_000 },
     });
   }
 

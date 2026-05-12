@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
-const WALRUS_NETWORK = (process.env.WALRUS_NETWORK ?? "testnet") as "mainnet" | "testnet";
+const WALRUS_NETWORK = (process.env.WALRUS_NETWORK ?? "mainnet") as "mainnet" | "testnet";
 const SUI_GRPC_URL =
   WALRUS_NETWORK === "mainnet"
     ? "https://fullnode.mainnet.sui.io:443"
@@ -23,7 +23,7 @@ async function getClients() {
     _walrusClient = new WalrusClient({
       network: WALRUS_NETWORK,
       suiClient: _suiClient,
-      storageNodeClientOptions: { timeout: 8_000 },
+      storageNodeClientOptions: { timeout: 12_000 },
     });
   }
   return { suiClient: _suiClient!, walrusClient: _walrusClient! };
