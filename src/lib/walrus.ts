@@ -1,12 +1,12 @@
 export const WALRUS_AGGREGATOR =
   process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus.space";
 
-// Browser-side singleton — cached after first encode call to amortize WASM init
+// Browser-side singleton — reused across calls to avoid re-fetching system state
 let _browserWalrusClient: import("@mysten/walrus").WalrusClient | null = null;
 
 // Stores a JSON blob on Walrus entirely in the browser.
-// All WASM encoding and sliver upload happen client-side, eliminating server
-// timeout issues. Storage nodes return CORS *, so direct browser upload works.
+// WASM runs client-side (no Vercel function timeout). Slivers are uploaded
+// directly to storage nodes which return Access-Control-Allow-Origin: *.
 // Falls back to storeOnWalrus (publisher REST API) if no wallet is connected.
 export async function storeOnWalrusWithWallet(
   data: object,
@@ -26,12 +26,13 @@ export async function storeOnWalrusWithWallet(
       ? "https://fullnode.mainnet.sui.io:443"
       : "https://fullnode.testnet.sui.io:443";
 
-  // Step 1: encode the blob with WASM (runs in the browser, no server timeout)
-  onStatus?.("Encoding blob…");
+  // Step 1: build WalrusClient — SuiJsonRpcClient is the browser-compatible
+  // HTTP JSON-RPC client (@mysten/sui/client does NOT export SuiClient)
+  onStatus?.("Preparing Walrus client…");
   if (!_browserWalrusClient) {
     const { WalrusClient } = await import("@mysten/walrus");
-    const { SuiClient } = await import("@mysten/sui/client");
-    const suiClient = new SuiClient({ url: suiRpcUrl });
+    const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
+    const suiClient = new SuiJsonRpcClient({ url: suiRpcUrl });
     _browserWalrusClient = new WalrusClient({
       network,
       suiClient,
@@ -41,17 +42,20 @@ export async function storeOnWalrusWithWallet(
 
   const blob = new TextEncoder().encode(JSON.stringify(data));
   const flow = _browserWalrusClient.writeBlobFlow({ blob });
+
+  // WASM encodes blob into slivers — runs in the browser, no server timeout
+  onStatus?.("Encoding blob…");
   const encoded = await flow.encode();
 
-  // Step 2: build register TX — coinWithBalance resolved by dapp-kit at sign time
+  // Build register TX — coinWithBalance resolved by dapp-kit at sign time
   onStatus?.("Preparing Walrus transaction…");
   const tx = flow.register({ owner, epochs, deletable: false });
 
-  // Step 3: wallet signs and pays WAL (dapp-kit resolves coinWithBalance)
+  // Wallet signs and pays WAL
   onStatus?.("Approve WAL payment in your wallet…");
   const { digest } = await signAndExecuteAsync(tx);
 
-  // Step 4: upload slivers directly from the browser to storage nodes (CORS *)
+  // Upload slivers directly from browser to storage nodes (CORS *)
   onStatus?.("Uploading to Walrus storage nodes…");
   await flow.upload({ digest });
 
