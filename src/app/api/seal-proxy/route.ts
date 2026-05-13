@@ -11,7 +11,9 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    // Include all headers the Seal SDK may send
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, Client-Sdk-Version, Client-Sdk-Type, Client-Target-Api-Version, X-Api-Key",
   };
 }
 
@@ -38,14 +40,17 @@ async function proxy(req: NextRequest, method: "GET" | "POST") {
 
   const body = method === "POST" ? await req.arrayBuffer() : undefined;
 
+  // Forward all request headers except host/connection so the key server
+  // receives SDK headers like Client-Sdk-Version, Client-Sdk-Type, etc.
+  const forwardHeaders: Record<string, string> = {};
+  const skip = new Set(["host", "connection", "transfer-encoding"]);
+  req.headers.forEach((value, key) => {
+    if (!skip.has(key.toLowerCase())) forwardHeaders[key] = value;
+  });
+
   const upstream = await fetch(target, {
     method,
-    headers: {
-      "Content-Type": req.headers.get("Content-Type") ?? "application/json",
-      ...(req.headers.get("Authorization")
-        ? { Authorization: req.headers.get("Authorization")! }
-        : {}),
-    },
+    headers: forwardHeaders,
     ...(body ? { body } : {}),
   });
 
