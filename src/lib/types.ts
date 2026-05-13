@@ -38,6 +38,7 @@ export interface FormResponse {
   formTitle: string;
   respondedAt: number;
   submitter?: string;
+  respondentWallet?: string;
   responses: FieldResponse[];
 }
 

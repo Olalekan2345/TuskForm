@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { X, Github, MessageSquare } from "lucide-react";
+import { X, Code2, MessageSquare } from "lucide-react";
 
 const SOCIAL = [
   { Icon: X,            href: "https://x.com/walrusprotocol",                  label: "X / Twitter" },
