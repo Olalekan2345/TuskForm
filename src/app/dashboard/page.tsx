@@ -34,6 +34,56 @@ interface ResponseWithForm extends FormResponse {
 type Priority = "none" | "urgent" | "in_progress" | "done";
 type SortKey  = "newest" | "oldest" | "form";
 
+const WALRUS_AGGREGATOR =
+  process.env.NEXT_PUBLIC_WALRUS_AGGREGATOR_URL ?? "https://aggregator.walrus-mainnet.walrus.space";
+
+interface BlobMeta { blobId: string; fileName: string; fileType: string; fileSize: number }
+
+function parseBlobMeta(value: string): BlobMeta | null {
+  if (!value.startsWith("{")) return null;
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed.blobId === "string" && typeof parsed.fileType === "string") {
+      return parsed as BlobMeta;
+    }
+  } catch { /* not JSON */ }
+  return null;
+}
+
+function FieldValue({ value }: { value: string }) {
+  const blob = parseBlobMeta(value);
+  if (blob) {
+    const url = `${WALRUS_AGGREGATOR}/v1/blobs/${blob.blobId}`;
+    if (blob.fileType.startsWith("image/")) {
+      return (
+        <div style={{ marginTop: 4 }}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={url}
+            alt={blob.fileName}
+            style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, border: "1px solid var(--border)" }}
+          />
+          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4 }}>
+            {blob.fileName} · {(blob.fileSize / 1024).toFixed(1)} KB
+          </div>
+        </div>
+      );
+    }
+    return (
+      <a
+        href={url}
+        download={blob.fileName}
+        target="_blank"
+        rel="noreferrer"
+        style={{ fontSize: "0.85rem", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
+      >
+        <Download size={12} /> {blob.fileName} ({(blob.fileSize / 1024).toFixed(1)} KB)
+      </a>
+    );
+  }
+  return <span style={{ fontSize: "0.9rem", color: "var(--ink)", lineHeight: 1.6 }}>{value}</span>;
+}
+
 const PRIORITY_CONFIG: Record<Priority, { label:string; color:string; bg:string; border:string; icon: React.ElementType }> = {
   none:        { label:"No priority", color:"#475569", bg:"rgba(71,85,105,0.1)",  border:"rgba(71,85,105,0.2)",  icon:Circle },
   urgent:      { label:"Urgent",      color:"#f87171", bg:"rgba(239,68,68,0.1)",  border:"rgba(239,68,68,0.25)", icon:AlertTriangle },
@@ -649,7 +699,7 @@ export default function DashboardPage() {
                             {f.encrypted ? (
                               <div>
                                 {decrypted[f.fieldId] ? (
-                                  <div style={{ fontSize:"0.9rem", color:"var(--ink)", lineHeight:1.6 }}>{decrypted[f.fieldId]}</div>
+                                  <div><FieldValue value={decrypted[f.fieldId]} /></div>
                                 ) : (
                                   <div style={{ display:"flex", alignItems:"flex-start", gap:6, padding:"8px 10px", borderRadius:8, background:"rgba(123,45,139,0.06)", border:"1px solid rgba(123,45,139,0.15)" }}>
                                     <Lock size={11} color="#c084fc" style={{ marginTop:1, flexShrink:0 }}/>
@@ -664,8 +714,10 @@ export default function DashboardPage() {
                                 )}
                               </div>
                             ) : (
-                              <div style={{ fontSize:"0.9rem", color:"var(--ink)", lineHeight:1.6 }}>
-                                {Array.isArray(f.value) ? f.value.join(", ") : String(f.value || "—")}
+                              <div>
+                                {Array.isArray(f.value)
+                                  ? <span style={{ fontSize:"0.9rem", color:"var(--ink)" }}>{f.value.join(", ")}</span>
+                                  : <FieldValue value={String(f.value || "")} />}
                               </div>
                             )}
                           </div>
