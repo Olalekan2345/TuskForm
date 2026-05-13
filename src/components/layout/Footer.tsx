@@ -4,7 +4,7 @@ import { X, Code2, MessageSquare } from "lucide-react";
 
 const SOCIAL = [
   { Icon: X,            href: "https://x.com/walrusprotocol",                  label: "X / Twitter" },
-  { Icon: Github,       href: "https://github.com/Olalekan2345/TuskForm",       label: "GitHub" },
+  { Icon: Code2,        href: "https://github.com/Olalekan2345/TuskForm",       label: "GitHub" },
   { Icon: MessageSquare,href: "https://discord.gg/walrusprotocol",              label: "Discord" },
 ];
 
