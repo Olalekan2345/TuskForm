@@ -23,7 +23,7 @@ import {
   Users, Inbox, Zap, Lock, Database, Loader2,
   ExternalLink, Copy, Check, Info, ArrowUpDown,
   Flag, MessageSquare, Download, ChevronDown, SortAsc, SortDesc,
-  Circle, AlertTriangle, CheckCheck, Pencil
+  Circle, AlertTriangle, CheckCheck, Pencil, Wallet
 } from "lucide-react";
 
 interface ResponseWithForm extends FormResponse {
@@ -643,6 +643,7 @@ export default function DashboardPage() {
                           </div>
                           <div style={{ display:"flex", alignItems:"center", gap:8, paddingLeft:20 }}>
                             <span style={{ fontSize:"0.7rem", color:"var(--ink-faint)" }}>{formatRelativeTime(new Date(r.respondedAt))}</span>
+                            {r.respondentWallet && <span title={r.respondentWallet} style={{ display:"flex" }}><Wallet size={10} color="var(--teal)"/></span>}
                             {notes[r.responseBlobId] && <MessageSquare size={10} color="var(--teal)" aria-label="Has note"/>}
                             {archived.has(r.responseBlobId) && <Archive size={10} color="var(--ink-faint)"/>}
                           </div>
@@ -667,6 +668,27 @@ export default function DashboardPage() {
                         <div>
                           <h3 style={{ fontSize:"1.05rem", fontWeight:800, color:"var(--ink)", marginBottom:4, fontFamily:"var(--font-display)" }}>{sel.formTitle}</h3>
                           <div style={{ fontSize:"0.75rem", color:"var(--ink-faint)" }}>{new Date(sel.respondedAt).toLocaleString()}</div>
+                          {sel.respondentWallet && (
+                            <div style={{ display:"flex", alignItems:"center", gap:6, marginTop:6 }}>
+                              <Wallet size={11} color="var(--teal)"/>
+                              <span style={{ fontSize:"0.72rem", color:"var(--teal-pale)", fontFamily:"monospace" }}>
+                                {sel.respondentWallet.slice(0,10)}…{sel.respondentWallet.slice(-8)}
+                              </span>
+                              <button
+                                onClick={() => navigator.clipboard.writeText(sel.respondentWallet!)}
+                                title="Copy full address"
+                                style={{ background:"none", border:"none", cursor:"pointer", color:"var(--ink-faint)", padding:0, display:"flex" }}>
+                                <Copy size={11}/>
+                              </button>
+                              <a
+                                href={`https://suiscan.xyz/mainnet/account/${sel.respondentWallet}`}
+                                target="_blank" rel="noreferrer"
+                                title="View on Suiscan"
+                                style={{ color:"var(--ink-faint)", display:"flex" }}>
+                                <ExternalLink size={11}/>
+                              </a>
+                            </div>
+                          )}
                         </div>
                         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                           {/* Priority picker */}
