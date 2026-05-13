@@ -8,7 +8,7 @@
 
 ## What it does
 
-TuskForm is a Google Forms alternative where every form definition and every response is stored as an immutable blob on **Walrus** (decentralized storage on Sui). Nothing lives in a traditional database.
+TuskForm is an on-chain form infrastructure built on Sui. Form schemas and responses are stored as immutable blobs on Walrus decentralized storage, with optional field-level threshold encryption via Mysten Seal. Respondents can optionally authenticate with their Sui wallet, giving creators verifiable, wallet-linked submissions.
 
 | Feature | How it works |
 |---|---|
