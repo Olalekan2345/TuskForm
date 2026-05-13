@@ -50,10 +50,17 @@ function parseBlobMeta(value: string): BlobMeta | null {
   return null;
 }
 
+function blobDownloadUrl(blob: BlobMeta) {
+  return `/api/download?blobId=${encodeURIComponent(blob.blobId)}&fileName=${encodeURIComponent(blob.fileName)}&fileType=${encodeURIComponent(blob.fileType)}`;
+}
+
+function blobInlineUrl(blob: BlobMeta) {
+  return `/api/download?blobId=${encodeURIComponent(blob.blobId)}&fileName=${encodeURIComponent(blob.fileName)}&fileType=${encodeURIComponent(blob.fileType)}&inline=1`;
+}
+
 function FieldValue({ value }: { value: string }) {
   const blob = parseBlobMeta(value);
   if (blob) {
-    const url = `${WALRUS_AGGREGATOR}/v1/blobs/${blob.blobId}`;
     const sizeTxt = (blob.fileSize / 1024).toFixed(1) + " KB";
 
     if (blob.fileType.startsWith("image/")) {
@@ -61,12 +68,15 @@ function FieldValue({ value }: { value: string }) {
         <div style={{ marginTop: 4 }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={url}
+            src={blobInlineUrl(blob)}
             alt={blob.fileName}
             style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, border: "1px solid var(--border)" }}
           />
-          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4 }}>
-            {blob.fileName} · {sizeTxt}
+          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{blob.fileName} · {sizeTxt}</span>
+            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Download size={11} /> Download
+            </a>
           </div>
         </div>
       );
@@ -75,11 +85,10 @@ function FieldValue({ value }: { value: string }) {
     if (blob.fileType.startsWith("audio/")) {
       return (
         <div style={{ marginTop: 4 }}>
-          <audio controls src={url} style={{ width: "100%", borderRadius: 8 }} />
+          <audio controls src={blobInlineUrl(blob)} style={{ width: "100%", borderRadius: 8 }} />
           <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
             <span>{blob.fileName} · {sizeTxt}</span>
-            <a href={url} download={blob.fileName} target="_blank" rel="noreferrer"
-              style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Download size={11} /> Download
             </a>
           </div>
@@ -90,11 +99,10 @@ function FieldValue({ value }: { value: string }) {
     if (blob.fileType.startsWith("video/")) {
       return (
         <div style={{ marginTop: 4 }}>
-          <video controls src={url} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 8, border: "1px solid var(--border)" }} />
+          <video controls src={blobInlineUrl(blob)} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 8, border: "1px solid var(--border)" }} />
           <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
             <span>{blob.fileName} · {sizeTxt}</span>
-            <a href={url} download={blob.fileName} target="_blank" rel="noreferrer"
-              style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
               <Download size={11} /> Download
             </a>
           </div>
@@ -104,10 +112,7 @@ function FieldValue({ value }: { value: string }) {
 
     return (
       <a
-        href={url}
-        download={blob.fileName}
-        target="_blank"
-        rel="noreferrer"
+        href={blobDownloadUrl(blob)}
         style={{ fontSize: "0.85rem", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
       >
         <Download size={12} /> {blob.fileName} ({sizeTxt})
