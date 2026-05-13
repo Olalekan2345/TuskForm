@@ -43,7 +43,7 @@ Private fields are encrypted client-side before upload using the Seal SDK:
 3. Encrypted bytes are stored in the Walrus response blob
 4. On the dashboard, owner signs a `SessionKey` transaction, the Seal SDK fetches the decryption key from the key servers, and values are decrypted locally
 
-Package deployed to Sui testnet: `0x3b179126a88104d254ffdea2157e173fe715b0d8acf7306c50b03076fa0fe14b`
+Package deployed to Sui mainnet: `0x3b179126a88104d254ffdea2157e173fe715b0d8acf7306c50b03076fa0fe14b`
 
 ---
 
