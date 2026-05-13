@@ -12,26 +12,32 @@ const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
 const USE_REDIS     = !!(UPSTASH_URL && UPSTASH_TOKEN);
 
 // ── Redis helpers ──────────────────────────────────────────────────────────
-async function redisGet(key: string): Promise<string[] | null> {
-  const res = await fetch(`${UPSTASH_URL}/get/${encodeURIComponent(key)}`, {
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
+// Uses the Upstash REST pipeline endpoint so values containing special
+// characters are sent in the JSON body rather than URL path segments.
+// Storage model: one Redis STRING key per form, value = JSON array of blob IDs.
+// (Previously used RPUSH → LIST type, which caused WRONGTYPE errors on GET.)
+
+async function redisPipeline(cmds: (string | number)[][]): Promise<unknown[]> {
+  const res = await fetch(`${UPSTASH_URL}/pipeline`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(cmds),
   });
   const json = await res.json();
-  if (!json.result) return null;
-  try { return JSON.parse(json.result); } catch { return null; }
+  return Array.isArray(json) ? json.map((r: { result: unknown }) => r.result) : [];
 }
 
-async function redisRpush(key: string, value: string): Promise<void> {
-  await fetch(`${UPSTASH_URL}/rpush/${encodeURIComponent(key)}/${encodeURIComponent(value)}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${UPSTASH_TOKEN}` },
-  });
+async function redisGetList(key: string): Promise<string[]> {
+  const [result] = await redisPipeline([["GET", key]]);
+  if (typeof result !== "string") return [];
+  try { return JSON.parse(result); } catch { return []; }
 }
 
-async function redisSismember(key: string, value: string): Promise<boolean> {
-  // We store as a Redis list, so check with lrange + includes
-  const items = await redisGet(key);
-  return items?.includes(value) ?? false;
+async function redisSetList(key: string, ids: string[]): Promise<void> {
+  await redisPipeline([["SET", key, JSON.stringify(ids)]]);
 }
 
 // ── Filesystem helpers (local dev only) ───────────────────────────────────
@@ -65,8 +71,8 @@ export async function GET(req: NextRequest) {
   }
   try {
     if (USE_REDIS) {
-      const items = await redisGet(`responses:${formId}`) ?? [];
-      return NextResponse.json({ responseBlobIds: items });
+      const ids = await redisGetList(`responses:${formId}`);
+      return NextResponse.json({ responseBlobIds: ids });
     }
     return NextResponse.json({ responseBlobIds: await fsGet(formId) });
   } catch (err) {
@@ -88,12 +94,13 @@ export async function POST(req: NextRequest) {
     }
 
     if (USE_REDIS) {
-      const alreadyExists = await redisSismember(`responses:${formId}`, responseBlobId);
-      if (!alreadyExists) {
-        await redisRpush(`responses:${formId}`, responseBlobId);
+      const key = `responses:${formId}`;
+      const ids = await redisGetList(key);
+      if (!ids.includes(responseBlobId)) {
+        ids.push(responseBlobId);
+        await redisSetList(key, ids);
       }
-      const items = await redisGet(`responses:${formId}`) ?? [];
-      return NextResponse.json({ ok: true, count: items.length });
+      return NextResponse.json({ ok: true, count: ids.length });
     }
 
     const count = await fsAdd(formId, responseBlobId);
