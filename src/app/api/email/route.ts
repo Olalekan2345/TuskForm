@@ -1,36 +1,71 @@
 import { NextRequest, NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 
-// ── Transport ──────────────────────────────────────────────────────────────
-// Primary: Gmail SMTP (GMAIL_USER + GMAIL_APP_PASSWORD env vars)
-// Fallback: Resend REST API (RESEND_API_KEY + verified domain required)
+// ── Transport priority ─────────────────────────────────────────────────────
+// 1. Brevo SMTP  — BREVO_SMTP_USER + BREVO_SMTP_KEY  (recommended, free)
+// 2. Gmail SMTP  — GMAIL_USER + GMAIL_APP_PASSWORD   (requires 2FA enabled)
+// 3. Generic SMTP— SMTP_HOST + SMTP_PORT + SMTP_USER + SMTP_PASS
+// 4. Resend REST — RESEND_API_KEY (requires verified domain for other recipients)
+
+const BREVO_USER = process.env.BREVO_SMTP_USER;
+const BREVO_KEY  = process.env.BREVO_SMTP_KEY;
+const USE_BREVO  = !!(BREVO_USER && BREVO_KEY);
 
 const GMAIL_USER = process.env.GMAIL_USER;
 const GMAIL_PASS = process.env.GMAIL_APP_PASSWORD;
-const USE_GMAIL  = !!(GMAIL_USER && GMAIL_PASS);
+const USE_GMAIL  = !USE_BREVO && !!(GMAIL_USER && GMAIL_PASS);
+
+const SMTP_HOST  = process.env.SMTP_HOST;
+const SMTP_PORT  = Number(process.env.SMTP_PORT || 587);
+const SMTP_USER  = process.env.SMTP_USER;
+const SMTP_PASS  = process.env.SMTP_PASS;
+const USE_SMTP   = !USE_BREVO && !USE_GMAIL && !!(SMTP_HOST && SMTP_USER && SMTP_PASS);
 
 const RESEND_API_KEY = process.env.RESEND_API_KEY;
 const RESEND_FROM    = process.env.RESEND_FROM || "TuskForm <onboarding@resend.dev>";
-const USE_RESEND     = !USE_GMAIL && !!(RESEND_API_KEY && RESEND_API_KEY !== "re_your_api_key_here");
+const USE_RESEND     = !USE_BREVO && !USE_GMAIL && !USE_SMTP &&
+                       !!(RESEND_API_KEY && RESEND_API_KEY !== "re_your_api_key_here");
 
-function getGmailTransport() {
-  return nodemailer.createTransport({
-    service: "gmail",
-    auth: { user: GMAIL_USER, pass: GMAIL_PASS },
-  });
+function buildTransport() {
+  if (USE_BREVO) {
+    return nodemailer.createTransport({
+      host: "smtp-relay.brevo.com",
+      port: 587,
+      secure: false,
+      auth: { user: BREVO_USER, pass: BREVO_KEY },
+    });
+  }
+  if (USE_GMAIL) {
+    return nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: GMAIL_USER, pass: GMAIL_PASS },
+    });
+  }
+  if (USE_SMTP) {
+    return nodemailer.createTransport({
+      host: SMTP_HOST,
+      port: SMTP_PORT,
+      secure: SMTP_PORT === 465,
+      auth: { user: SMTP_USER, pass: SMTP_PASS },
+    });
+  }
+  return null;
 }
 
-async function sendViaGmail(to: string, subject: string, html: string) {
-  const transporter = getGmailTransport();
-  await transporter.sendMail({
-    from: `TuskForm <${GMAIL_USER}>`,
-    to,
-    subject,
-    html,
-  });
+function getSenderAddress() {
+  if (USE_BREVO)  return `TuskForm <${BREVO_USER}>`;
+  if (USE_GMAIL)  return `TuskForm <${GMAIL_USER}>`;
+  if (USE_SMTP)   return `TuskForm <${SMTP_USER}>`;
+  return RESEND_FROM;
 }
 
-async function sendViaResend(to: string, subject: string, html: string) {
+async function sendEmail(to: string, subject: string, html: string) {
+  const transport = buildTransport();
+  if (transport) {
+    await transport.sendMail({ from: getSenderAddress(), to, subject, html });
+    return;
+  }
+  // Resend fallback
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -130,9 +165,9 @@ function buildHtml(body: EmailPayload): { subject: string; html: string } | null
 // ── Route handler ──────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  if (!USE_GMAIL && !USE_RESEND) {
+  if (!USE_BREVO && !USE_GMAIL && !USE_SMTP && !USE_RESEND) {
     return NextResponse.json(
-      { error: "Email not configured. Set GMAIL_USER + GMAIL_APP_PASSWORD in env vars." },
+      { error: "Email not configured. Add BREVO_SMTP_USER + BREVO_SMTP_KEY (or GMAIL_USER + GMAIL_APP_PASSWORD) to env vars." },
       { status: 503 }
     );
   }
@@ -150,11 +185,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    if (USE_GMAIL) {
-      await sendViaGmail(to, email.subject, email.html);
-    } else {
-      await sendViaResend(to, email.subject, email.html);
-    }
+    await sendEmail(to, email.subject, email.html);
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[email] send failed:", err);
