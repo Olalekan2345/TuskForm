@@ -58,6 +58,30 @@ function blobInlineUrl(blob: BlobMeta) {
   return `/api/download?blobId=${encodeURIComponent(blob.blobId)}&fileName=${encodeURIComponent(blob.fileName)}&fileType=${encodeURIComponent(blob.fileType)}&inline=1`;
 }
 
+function FileActions({ blob, sizeTxt, openLabel = "Open in new tab" }: { blob: BlobMeta; sizeTxt: string; openLabel?: string }) {
+  const btnBase: React.CSSProperties = {
+    display: "inline-flex", alignItems: "center", gap: 5,
+    padding: "5px 11px", borderRadius: 7, fontSize: "0.78rem",
+    fontWeight: 600, cursor: "pointer", textDecoration: "none", border: "1px solid",
+    transition: "opacity 0.15s",
+  };
+  return (
+    <div style={{ marginTop: 8, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+      <span style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginRight: 4 }}>
+        {blob.fileName} · {sizeTxt}
+      </span>
+      <a href={blobInlineUrl(blob)} target="_blank" rel="noreferrer"
+        style={{ ...btnBase, background: "rgba(0,200,224,0.08)", borderColor: "rgba(0,200,224,0.25)", color: "var(--teal-pale)" }}>
+        <ExternalLink size={11} /> {openLabel}
+      </a>
+      <a href={blobDownloadUrl(blob)}
+        style={{ ...btnBase, background: "rgba(255,255,255,0.04)", borderColor: "var(--glass-border)", color: "var(--ink-muted)" }}>
+        <Download size={11} /> Download
+      </a>
+    </div>
+  );
+}
+
 function FieldValue({ value }: { value: string }) {
   const blob = parseBlobMeta(value);
   if (blob) {
@@ -72,12 +96,7 @@ function FieldValue({ value }: { value: string }) {
             alt={blob.fileName}
             style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, border: "1px solid var(--border)" }}
           />
-          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>{blob.fileName} · {sizeTxt}</span>
-            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
-              <Download size={11} /> Download
-            </a>
-          </div>
+          <FileActions blob={blob} sizeTxt={sizeTxt} openLabel="Open full size" />
         </div>
       );
     }
@@ -86,12 +105,7 @@ function FieldValue({ value }: { value: string }) {
       return (
         <div style={{ marginTop: 4 }}>
           <audio controls src={blobInlineUrl(blob)} style={{ width: "100%", borderRadius: 8 }} />
-          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>{blob.fileName} · {sizeTxt}</span>
-            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
-              <Download size={11} /> Download
-            </a>
-          </div>
+          <FileActions blob={blob} sizeTxt={sizeTxt} openLabel="Play in new tab" />
         </div>
       );
     }
@@ -100,23 +114,21 @@ function FieldValue({ value }: { value: string }) {
       return (
         <div style={{ marginTop: 4 }}>
           <video controls src={blobInlineUrl(blob)} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 8, border: "1px solid var(--border)" }} />
-          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
-            <span>{blob.fileName} · {sizeTxt}</span>
-            <a href={blobDownloadUrl(blob)} style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
-              <Download size={11} /> Download
-            </a>
-          </div>
+          <FileActions blob={blob} sizeTxt={sizeTxt} openLabel="Play in new tab" />
         </div>
       );
     }
 
+    // PDF, Word, zip, etc.
     return (
-      <a
-        href={blobDownloadUrl(blob)}
-        style={{ fontSize: "0.85rem", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
-      >
-        <Download size={12} /> {blob.fileName} ({sizeTxt})
-      </a>
+      <div style={{ marginTop: 4, padding: "12px 14px", borderRadius: 10, background: "rgba(255,255,255,0.03)", border: "1px solid var(--glass-border)", display: "inline-block" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+          <FileText size={16} color="var(--ink-muted)" />
+          <span style={{ fontSize: "0.88rem", fontWeight: 600, color: "var(--ink)" }}>{blob.fileName}</span>
+          <span style={{ fontSize: "0.72rem", color: "var(--ink-faint)" }}>{sizeTxt}</span>
+        </div>
+        <FileActions blob={blob} sizeTxt="" openLabel="Open in new tab" />
+      </div>
     );
   }
   return <span style={{ fontSize: "0.9rem", color: "var(--ink)", lineHeight: 1.6 }}>{value}</span>;
