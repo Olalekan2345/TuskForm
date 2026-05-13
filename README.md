@@ -2,7 +2,7 @@
 
 > Build forms. Store responses forever. Gate access with wallet addresses. No servers. No databases. No middlemen.
 
-**Live app:** [tuskform.up.railway.app](https://tuskform.up.railway.app)
+**Live app:** [tuskform-production.up.railway.app](https://tuskform-production.up.railway.app)
 
 ---
 
