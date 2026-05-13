@@ -17,10 +17,10 @@ import { Transaction } from "@mysten/sui/transactions";
 
 export const SEAL_NETWORK = "mainnet";
 
-// Known Seal mainnet key servers (independent, weight 1 each).
+// Verified Seal mainnet key servers (NodeInfra, both confirmed to exist on-chain).
 // Override via NEXT_PUBLIC_SEAL_SERVER_* env vars.
 const DEFAULT_SERVER_1 = "0x1afb3a57211ceff8f6781757821847e3ddae73f64e78ec8cd9349914ad985475";
-const DEFAULT_SERVER_2 = "0x164ac3d2b3b8694b8181c13f671950004765c23f270321a45fdd04d40cccf0f2";
+const DEFAULT_SERVER_2 = "0x9fa1c86659a98201d464962b8344c6948f3fb2572d585d57a028973c6357e2db";
 
 function getSealServerConfigs() {
   const s1 = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SEAL_SERVER_1) || DEFAULT_SERVER_1;
