@@ -130,8 +130,8 @@ export async function encryptFieldSeal(
 
 /**
  * Builds the transaction bytes that call address_gate::seal_approve.
- * The Seal key servers dry-run this tx to verify ctx.sender() == address::from_bytes(id).
- * Must be a full TransactionData (with sender set), not just a TransactionKind.
+ * Uses onlyTransactionKind so no gas resolution (network call) is needed.
+ * The Seal key servers supply the sender from the SessionKey certificate when simulating.
  */
 export async function buildSealApprovalTx(
   packageId: string,
@@ -143,10 +143,9 @@ export async function buildSealApprovalTx(
     target: `${packageId}::address_gate::seal_approve`,
     arguments: [tx.pure.vector("u8", Array.from(idBytes))],
   });
-  tx.setSender(creatorAddress);
-  // Build full TransactionData (key servers need sender in the bytes to verify ctx.sender)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return tx.build({ client: getSuiClient() as any });
+  // onlyTransactionKind = no gas/sender in bytes, no network call needed.
+  // Key server uses address from SessionKey.certificate as ctx.sender().
+  return tx.build({ onlyTransactionKind: true });
 }
 
 // ── v3 Seal decryption (creator dashboard) ────────────────────────────────────
