@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 // Allowed upstream key server hostnames — never proxy arbitrary URLs
 const ALLOWED_HOSTS = [
+  // Mysten Labs testnet open-mode servers
+  "seal-key-server-testnet-1.mystenlabs.com",
+  "seal-key-server-testnet-2.mystenlabs.com",
+  // NodeInfra mainnet (kept for legacy; these return duplicate CORS headers)
   "open-seal-mainnet.nodeinfra.com",
   "seal-mainnet.nodeinfra.com",
   "seal-mainnet.mystenlabs.com",
@@ -11,9 +15,8 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    // Include all headers the Seal SDK may send
     "Access-Control-Allow-Headers":
-      "Content-Type, Authorization, Client-Sdk-Version, Client-Sdk-Type, Client-Target-Api-Version, X-Api-Key",
+      "Content-Type, Authorization, Client-Sdk-Version, Client-Sdk-Type, Client-Target-Api-Version, Request-Id, X-Api-Key",
   };
 }
 
@@ -38,15 +41,14 @@ async function proxy(req: NextRequest, method: "GET" | "POST") {
     return NextResponse.json({ error: "forbidden host" }, { status: 403 });
   }
 
-  const body = method === "POST" ? await req.arrayBuffer() : undefined;
-
-  // Forward all request headers except host/connection so the key server
-  // receives SDK headers like Client-Sdk-Version, Client-Sdk-Type, etc.
+  // Forward all request headers except hop-by-hop ones
   const forwardHeaders: Record<string, string> = {};
-  const skip = new Set(["host", "connection", "transfer-encoding"]);
+  const skipRequest = new Set(["host", "connection", "transfer-encoding"]);
   req.headers.forEach((value, key) => {
-    if (!skip.has(key.toLowerCase())) forwardHeaders[key] = value;
+    if (!skipRequest.has(key.toLowerCase())) forwardHeaders[key] = value;
   });
+
+  const body = method === "POST" ? await req.arrayBuffer() : undefined;
 
   const upstream = await fetch(target, {
     method,
@@ -55,10 +57,22 @@ async function proxy(req: NextRequest, method: "GET" | "POST") {
   });
 
   const data = await upstream.arrayBuffer();
+
+  // Forward all upstream response headers except CORS ones (we set our own).
+  // Critically, X-KeyServer-Version must be forwarded — the Seal SDK reads it
+  // to verify the key server meets the minimum version requirement.
+  const responseHeaders: Record<string, string> = {};
+  const skipResponse = new Set(["access-control-allow-origin", "access-control-allow-methods", "access-control-allow-headers", "access-control-expose-headers"]);
+  upstream.headers.forEach((value, key) => {
+    if (!skipResponse.has(key.toLowerCase())) {
+      responseHeaders[key] = value;
+    }
+  });
+
   return new NextResponse(data, {
     status: upstream.status,
     headers: {
-      "Content-Type": upstream.headers.get("Content-Type") ?? "application/octet-stream",
+      ...responseHeaders,
       ...corsHeaders(),
     },
   });

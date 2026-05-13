@@ -5,7 +5,7 @@
 //   Format: "seal:v2:<base64(ephPub[65] + iv[12] + ciphertext)>"
 //
 // v3 (Seal): real Mysten Seal threshold IBE encryption.
-//   The encrypted object is stored as BCS bytes and base64-encoded.
+//   Uses Mysten Labs testnet open-mode key servers (no package registration).
 //   Only the creator can decrypt by presenting a valid seal_approve transaction.
 //   Format: "seal:v3:<base64(encryptedObject)>"
 
@@ -15,12 +15,14 @@ import { Transaction } from "@mysten/sui/transactions";
 
 // ── Network / key server config ──────────────────────────────────────────────
 
-export const SEAL_NETWORK = "mainnet";
+// Seal runs on testnet — Mysten Labs open-mode servers (no package registration needed).
+// The Walrus storage layer stays on mainnet; these are independent concerns.
+export const SEAL_NETWORK = "testnet";
 
-// Verified Seal mainnet key servers (NodeInfra, both confirmed to exist on-chain).
-// Override via NEXT_PUBLIC_SEAL_SERVER_* env vars.
-const DEFAULT_SERVER_1 = "0x1afb3a57211ceff8f6781757821847e3ddae73f64e78ec8cd9349914ad985475";
-const DEFAULT_SERVER_2 = "0x9fa1c86659a98201d464962b8344c6948f3fb2572d585d57a028973c6357e2db";
+// Mysten Labs testnet open-mode key servers (verified on-chain, no allowlist).
+// URLs: seal-key-server-testnet-{1,2}.mystenlabs.com
+const DEFAULT_SERVER_1 = "0x73d05d62c18d9374e3ea529e8e0ed6161da1a141a94d3f76ae3fe4e99356db75";
+const DEFAULT_SERVER_2 = "0xf5d14a81a982144ae441cd7d64b09027f116a468bd36e7eca494f750591623c8";
 
 function getSealServerConfigs() {
   const s1 = (typeof process !== "undefined" && process.env.NEXT_PUBLIC_SEAL_SERVER_1) || DEFAULT_SERVER_1;
@@ -31,25 +33,28 @@ function getSealServerConfigs() {
   ];
 }
 
-// Lazy singleton SuiJsonRpcClient (client-side only)
+// Lazy singleton SuiJsonRpcClient — connected to TESTNET for Seal operations.
+// (Walrus/wallet operations use their own mainnet clients; these are separate.)
 let _suiClient: SuiJsonRpcClient | null = null;
 function getSuiClient(): SuiJsonRpcClient {
   if (!_suiClient) {
     _suiClient = new SuiJsonRpcClient({
-      network: "mainnet",
-      url: getJsonRpcFullnodeUrl("mainnet"),
+      network: "testnet",
+      url: getJsonRpcFullnodeUrl("testnet"),
     });
   }
   return _suiClient;
 }
 
-// NodeInfra's key servers return "Access-Control-Allow-Origin: *, *" (duplicate),
-// which browsers reject. Intercept those fetches and route them through our API proxy
-// which strips the duplicate header and returns a single clean one.
+// Intercept fetches to known Seal key server hostnames and route them through
+// our /api/seal-proxy route to avoid CORS issues from any key server implementation.
 const SEAL_PROXY_HOSTS = [
+  // Mysten Labs testnet
+  "seal-key-server-testnet-1.mystenlabs.com",
+  "seal-key-server-testnet-2.mystenlabs.com",
+  // NodeInfra mainnet (kept for safety — they return duplicate CORS headers)
   "open-seal-mainnet.nodeinfra.com",
   "seal-mainnet.nodeinfra.com",
-  "seal-mainnet.mystenlabs.com",
 ];
 
 function installSealFetchProxy() {
@@ -61,9 +66,18 @@ function installSealFetchProxy() {
 
   const original = window.fetch.bind(window);
   window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
-    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    const raw =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+        ? input.href
+        : (input as Request).url;
     let host: string;
-    try { host = new URL(raw).hostname; } catch { return original(input, init); }
+    try {
+      host = new URL(raw).hostname;
+    } catch {
+      return original(input, init);
+    }
     if (SEAL_PROXY_HOSTS.includes(host)) {
       const proxied = `/api/seal-proxy?target=${encodeURIComponent(raw)}`;
       return original(proxied, init);
@@ -134,7 +148,8 @@ export function isEncryptedField(privacy: "public" | "encrypted" | "admin_only")
 
 /**
  * Encrypts plaintext using Mysten Seal threshold IBE.
- * Identity = creator's Sui address (32-byte hex, no 0x).
+ * Identity = creator's Sui address (32-byte hex, no 0x prefix).
+ * threshold=1 means either key server can decrypt — resilient to server downtime.
  * Returns "seal:v3:<base64(encryptedObject)>".
  */
 export async function encryptFieldSeal(
@@ -147,13 +162,15 @@ export async function encryptFieldSeal(
   const data = new TextEncoder().encode(plaintext);
 
   const { encryptedObject } = await sealClient.encrypt({
-    threshold: 2,
+    threshold: 1,
     packageId,
     id,
     data,
   });
 
-  return V3_PREFIX + toB64(encryptedObject.buffer as ArrayBuffer);
+  // Use .slice() to get a fresh ArrayBuffer copy — encryptedObject may be a
+  // view into a larger backing buffer, which would encode extra garbage bytes.
+  return V3_PREFIX + toB64(encryptedObject.slice().buffer as ArrayBuffer);
 }
 
 // ── v3 Seal approval transaction ──────────────────────────────────────────────
@@ -182,7 +199,6 @@ export async function buildSealApprovalTx(
 
 /**
  * Creates and authenticates a SessionKey.
- * Returns the SessionKey after the user signs the personal message.
  * `signPersonalMessage(bytes)` should call the wallet adapter's signPersonalMessage.
  */
 export async function createAuthenticatedSessionKey(
@@ -276,7 +292,7 @@ export async function encryptField(plaintext: string, publicKeyB64: string): Pro
   payload.set(new Uint8Array(ephPubRaw), 0);
   payload.set(iv, 65);
   payload.set(new Uint8Array(ct), 77);
-  return V2_PREFIX + toB64(payload.buffer as ArrayBuffer);
+  return V2_PREFIX + toB64(payload.slice().buffer as ArrayBuffer);
 }
 
 export async function decryptField(ciphertext: string, privateKeyB64: string): Promise<string | null> {
