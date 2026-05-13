@@ -54,6 +54,8 @@ function FieldValue({ value }: { value: string }) {
   const blob = parseBlobMeta(value);
   if (blob) {
     const url = `${WALRUS_AGGREGATOR}/v1/blobs/${blob.blobId}`;
+    const sizeTxt = (blob.fileSize / 1024).toFixed(1) + " KB";
+
     if (blob.fileType.startsWith("image/")) {
       return (
         <div style={{ marginTop: 4 }}>
@@ -64,11 +66,42 @@ function FieldValue({ value }: { value: string }) {
             style={{ maxWidth: "100%", maxHeight: 300, borderRadius: 8, border: "1px solid var(--border)" }}
           />
           <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4 }}>
-            {blob.fileName} · {(blob.fileSize / 1024).toFixed(1)} KB
+            {blob.fileName} · {sizeTxt}
           </div>
         </div>
       );
     }
+
+    if (blob.fileType.startsWith("audio/")) {
+      return (
+        <div style={{ marginTop: 4 }}>
+          <audio controls src={url} style={{ width: "100%", borderRadius: 8 }} />
+          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{blob.fileName} · {sizeTxt}</span>
+            <a href={url} download={blob.fileName} target="_blank" rel="noreferrer"
+              style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Download size={11} /> Download
+            </a>
+          </div>
+        </div>
+      );
+    }
+
+    if (blob.fileType.startsWith("video/")) {
+      return (
+        <div style={{ marginTop: 4 }}>
+          <video controls src={url} style={{ maxWidth: "100%", maxHeight: 320, borderRadius: 8, border: "1px solid var(--border)" }} />
+          <div style={{ fontSize: "0.72rem", color: "var(--ink-muted)", marginTop: 4, display: "flex", alignItems: "center", gap: 8 }}>
+            <span>{blob.fileName} · {sizeTxt}</span>
+            <a href={url} download={blob.fileName} target="_blank" rel="noreferrer"
+              style={{ color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 3 }}>
+              <Download size={11} /> Download
+            </a>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <a
         href={url}
@@ -77,7 +110,7 @@ function FieldValue({ value }: { value: string }) {
         rel="noreferrer"
         style={{ fontSize: "0.85rem", color: "var(--accent)", display: "inline-flex", alignItems: "center", gap: 4 }}
       >
-        <Download size={12} /> {blob.fileName} ({(blob.fileSize / 1024).toFixed(1)} KB)
+        <Download size={12} /> {blob.fileName} ({sizeTxt})
       </a>
     );
   }
