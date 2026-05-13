@@ -115,6 +115,7 @@ export default function DashboardPage() {
   const [sortKey, setSortKey]     = useState<SortKey>("newest");
   const [showSort, setShowSort]   = useState(false);
   const [copiedLink, setCopiedLink] = useState<string|null>(null);
+  const [selectedFormId, setSelectedFormId] = useState<string|null>(null);
 
   // Per-response metadata (stored in localStorage)
   const [starred,    setStarred]    = useState<Set<string>>(new Set());
@@ -310,6 +311,7 @@ export default function DashboardPage() {
     .filter(r => {
       if (archived.has(r.responseBlobId) && navKey !== "archived") return false;
       if (!archived.has(r.responseBlobId) && navKey === "archived") return false;
+      if (selectedFormId && r.formId !== selectedFormId) return false;
       const matchSearch = !search ||
         r.formTitle?.toLowerCase().includes(search.toLowerCase()) ||
         r.responses?.some(f => String(f.value).toLowerCase().includes(search.toLowerCase()));
@@ -403,7 +405,7 @@ export default function DashboardPage() {
           <div style={{ padding:"0 10px", flex:1, overflowY:"auto" }}>
             <div style={{ fontSize:"0.68rem", fontWeight:700, color:"var(--ink-faint)", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:8, padding:"0 6px" }}>Inbox</div>
             {NAV_ITEMS.map(n => (
-              <button key={n.key} onClick={() => { setNavKey(n.key); setSelIdx(null); }} className={`nav-item ${navKey===n.key?"active":""}`} style={{ marginBottom:2 }}>
+              <button key={n.key} onClick={() => { setNavKey(n.key); setSelIdx(null); setSelectedFormId(null); }} className={`nav-item ${navKey===n.key && !selectedFormId?"active":""}`} style={{ marginBottom:2 }}>
                 <n.icon size={14}/>
                 <span style={{ flex:1, fontSize:"0.83rem" }}>{n.label}</span>
                 {n.key==="all" && responses.length>0 && <span className="badge badge-primary">{responses.length}</span>}
@@ -416,32 +418,46 @@ export default function DashboardPage() {
             {myForms.length > 0 && (
               <>
                 <div style={{ fontSize:"0.68rem", fontWeight:700, color:"var(--ink-faint)", textTransform:"uppercase", letterSpacing:"0.08em", margin:"16px 0 8px", padding:"0 6px" }}>My Forms</div>
-                {myForms.map(form => (
-                  <div key={form.blobId} style={{ padding:"8px 8px", borderRadius:9, marginBottom:2, display:"flex", alignItems:"center", gap:6 }}>
-                    <FileText size={12} color="var(--ink-faint)" style={{ flexShrink:0 }}/>
-                    <span style={{ fontSize:"0.78rem", color:"var(--ink-muted)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }} title={form.title}>
-                      {form.title}
-                    </span>
-                    <div style={{ display:"flex", gap:2 }}>
-                      <button onClick={() => copyFormLink(form.blobId)} title="Copy link"
-                        style={{ padding:"3px 5px", borderRadius:5, background:"none", border:"none", cursor:"pointer", color:"var(--ink-faint)" }}>
-                        {copiedLink===form.blobId ? <Check size={11} color="#34d399"/> : <Copy size={11}/>}
+                {myForms.map(form => {
+                  const isActive = selectedFormId === form.blobId;
+                  const formResponseCount = responses.filter(r => r.formId === form.blobId).length;
+                  return (
+                    <div key={form.blobId} style={{ borderRadius:9, marginBottom:2, background: isActive ? "rgba(0,200,224,0.08)" : "none", border: isActive ? "1px solid rgba(0,200,224,0.2)" : "1px solid transparent" }}>
+                      <button
+                        onClick={() => { setSelectedFormId(isActive ? null : form.blobId); setSelIdx(null); setNavKey("all"); }}
+                        style={{ width:"100%", display:"flex", alignItems:"center", gap:6, padding:"8px 8px", background:"none", border:"none", cursor:"pointer", textAlign:"left" }}
+                      >
+                        <FileText size={12} color={isActive ? "var(--teal)" : "var(--ink-faint)"} style={{ flexShrink:0 }}/>
+                        <span style={{ fontSize:"0.78rem", color: isActive ? "var(--teal)" : "var(--ink-muted)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight: isActive ? 600 : 400 }} title={form.title}>
+                          {form.title}
+                        </span>
+                        {formResponseCount > 0 && (
+                          <span style={{ fontSize:"0.65rem", background:"rgba(0,200,224,0.12)", color:"var(--teal)", borderRadius:10, padding:"1px 5px", fontWeight:600, flexShrink:0 }}>
+                            {formResponseCount}
+                          </span>
+                        )}
                       </button>
-                      <a href={`/builder?edit=${form.blobId}`} title="Edit form"
-                        style={{ padding:"3px 5px", borderRadius:5, display:"flex", alignItems:"center", color:"var(--ink-faint)" }}>
-                        <Pencil size={11}/>
-                      </a>
-                      <a href={`/forms/${form.blobId}`} target="_blank" rel="noreferrer"
-                        style={{ padding:"3px 5px", borderRadius:5, display:"flex", alignItems:"center", color:"var(--ink-faint)" }}>
-                        <ExternalLink size={11}/>
-                      </a>
-                      <button onClick={() => deleteForm(form.blobId)} title="Remove"
-                        style={{ padding:"3px 5px", borderRadius:5, background:"none", border:"none", cursor:"pointer", color:"var(--ink-faint)" }}>
-                        <Trash2 size={11}/>
-                      </button>
+                      <div style={{ display:"flex", gap:2, padding:"0 4px 4px" }}>
+                        <button onClick={() => copyFormLink(form.blobId)} title="Copy link"
+                          style={{ padding:"3px 5px", borderRadius:5, background:"none", border:"none", cursor:"pointer", color:"var(--ink-faint)" }}>
+                          {copiedLink===form.blobId ? <Check size={11} color="#34d399"/> : <Copy size={11}/>}
+                        </button>
+                        <a href={`/builder?edit=${form.blobId}`} title="Edit form"
+                          style={{ padding:"3px 5px", borderRadius:5, display:"flex", alignItems:"center", color:"var(--ink-faint)" }}>
+                          <Pencil size={11}/>
+                        </a>
+                        <a href={`/forms/${form.blobId}`} target="_blank" rel="noreferrer"
+                          style={{ padding:"3px 5px", borderRadius:5, display:"flex", alignItems:"center", color:"var(--ink-faint)" }}>
+                          <ExternalLink size={11}/>
+                        </a>
+                        <button onClick={() => deleteForm(form.blobId)} title="Remove"
+                          style={{ padding:"3px 5px", borderRadius:5, background:"none", border:"none", cursor:"pointer", color:"var(--ink-faint)" }}>
+                          <Trash2 size={11}/>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
@@ -511,6 +527,15 @@ export default function DashboardPage() {
                   <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search responses…"
                     style={{ background:"none", border:"none", outline:"none", fontSize:"0.83rem", color:"var(--ink)", flex:1 }} />
                 </div>
+                {selectedFormId && (
+                  <div style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 10px", borderRadius:10, background:"rgba(0,200,224,0.08)", border:"1px solid rgba(0,200,224,0.25)", whiteSpace:"nowrap" }}>
+                    <FileText size={12} color="var(--teal)"/>
+                    <span style={{ fontSize:"0.78rem", color:"var(--teal)", fontWeight:600, maxWidth:140, overflow:"hidden", textOverflow:"ellipsis" }}>
+                      {myForms.find(f => f.blobId === selectedFormId)?.title ?? "Form"}
+                    </span>
+                    <button onClick={() => setSelectedFormId(null)} style={{ background:"none", border:"none", cursor:"pointer", color:"var(--teal)", display:"flex", lineHeight:1, padding:0 }}>×</button>
+                  </div>
+                )}
 
                 {/* Sort */}
                 <div style={{ position:"relative" }}>
