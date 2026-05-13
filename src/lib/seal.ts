@@ -43,14 +43,44 @@ function getSuiClient(): SuiJsonRpcClient {
   return _suiClient;
 }
 
+// NodeInfra's key servers return "Access-Control-Allow-Origin: *, *" (duplicate),
+// which browsers reject. Intercept those fetches and route them through our API proxy
+// which strips the duplicate header and returns a single clean one.
+const SEAL_PROXY_HOSTS = [
+  "open-seal-mainnet.nodeinfra.com",
+  "seal-mainnet.nodeinfra.com",
+  "seal-mainnet.mystenlabs.com",
+];
+
+function installSealFetchProxy() {
+  if (typeof window === "undefined") return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((window as any).__sealProxyInstalled) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__sealProxyInstalled = true;
+
+  const original = window.fetch.bind(window);
+  window.fetch = function (input: RequestInfo | URL, init?: RequestInit) {
+    const raw = typeof input === "string" ? input : input instanceof URL ? input.href : (input as Request).url;
+    let host: string;
+    try { host = new URL(raw).hostname; } catch { return original(input, init); }
+    if (SEAL_PROXY_HOSTS.includes(host)) {
+      const proxied = `/api/seal-proxy?target=${encodeURIComponent(raw)}`;
+      return original(proxied, init);
+    }
+    return original(input, init);
+  };
+}
+
 // Lazy singleton SealClient (client-side only)
 let _sealClient: SealClient | null = null;
 export function getSealClient(): SealClient {
+  installSealFetchProxy();
   if (!_sealClient) {
     _sealClient = new SealClient({
       suiClient: getSuiClient(),
       serverConfigs: getSealServerConfigs(),
-      verifyKeyServers: false, // Skip until we know server keys are stable
+      verifyKeyServers: false,
     });
   }
   return _sealClient;
