@@ -130,7 +130,8 @@ export async function encryptFieldSeal(
 
 /**
  * Builds the transaction bytes that call address_gate::seal_approve.
- * The Seal key servers simulate this to verify the caller is the creator.
+ * The Seal key servers dry-run this tx to verify ctx.sender() == address::from_bytes(id).
+ * Must be a full TransactionData (with sender set), not just a TransactionKind.
  */
 export async function buildSealApprovalTx(
   packageId: string,
@@ -142,9 +143,10 @@ export async function buildSealApprovalTx(
     target: `${packageId}::address_gate::seal_approve`,
     arguments: [tx.pure.vector("u8", Array.from(idBytes))],
   });
-  // Build only the transaction kind bytes (no gas needed for simulation)
+  tx.setSender(creatorAddress);
+  // Build full TransactionData (key servers need sender in the bytes to verify ctx.sender)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return tx.build({ client: getSuiClient() as any, onlyTransactionKind: true });
+  return tx.build({ client: getSuiClient() as any });
 }
 
 // ── v3 Seal decryption (creator dashboard) ────────────────────────────────────
@@ -175,7 +177,7 @@ export async function createAuthenticatedSessionKey(
 
 /**
  * Decrypts a "seal:v3:…" ciphertext using the creator's authenticated SessionKey.
- * Returns the decrypted plaintext, or null on failure.
+ * Throws on failure so the caller can surface the error to the user.
  */
 export async function decryptFieldSeal(
   ciphertext: string,
@@ -183,13 +185,9 @@ export async function decryptFieldSeal(
   txBytes: Uint8Array,
 ): Promise<string | null> {
   if (!ciphertext.startsWith(V3_PREFIX)) return null;
-  try {
-    const encrypted = fromB64(ciphertext.slice(V3_PREFIX.length));
-    const plain = await getSealClient().decrypt({ data: encrypted, sessionKey, txBytes });
-    return new TextDecoder().decode(plain);
-  } catch {
-    return null;
-  }
+  const encrypted = fromB64(ciphertext.slice(V3_PREFIX.length));
+  const plain = await getSealClient().decrypt({ data: encrypted, sessionKey, txBytes });
+  return new TextDecoder().decode(plain);
 }
 
 // ── v2 ECIES (legacy / fallback) ─────────────────────────────────────────────

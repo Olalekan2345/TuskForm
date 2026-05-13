@@ -154,15 +154,28 @@ export default function DashboardPage() {
       const txBytes = await buildSealApprovalTx(pkgId, address);
 
       const map: Record<string, string> = { ...decrypted };
+      let firstErr: string | null = null;
       for (const r of sel.responses ?? []) {
         if (r.encrypted && isSealV3Value(String(r.value))) {
-          const plain = await decryptFieldSeal(String(r.value), sessionKey, txBytes);
-          if (plain !== null) map[r.fieldId] = plain;
+          try {
+            const plain = await decryptFieldSeal(String(r.value), sessionKey, txBytes);
+            if (plain !== null) map[r.fieldId] = plain;
+          } catch (err) {
+            console.error("[Seal] field decrypt error:", err);
+            if (!firstErr) firstErr = err instanceof Error ? err.message : String(err);
+          }
         }
       }
       setDecrypted(map);
-      setSealState("done");
+      if (firstErr && Object.keys(map).length === Object.keys(decrypted).length) {
+        // Nothing new was decrypted — surface the error
+        setSealError(firstErr);
+        setSealState("error");
+      } else {
+        setSealState("done");
+      }
     } catch (err) {
+      console.error("[Seal] decryptV3Fields error:", err);
       setSealError(err instanceof Error ? err.message : "Decryption failed");
       setSealState("error");
     }
