@@ -104,7 +104,7 @@ export function Hero({ onAuthOpen }: { onAuthOpen?: () => void }) {
           { label:"Response Rate",  val:"94.2%",        icon:<Star size={14} color="#34d399" fill="#34d399"/>, bg:"rgba(16,185,129,0.08)", bd:"rgba(16,185,129,0.2)", pos:{ bottom:-20, right:40 } },
         ].map((f) => (
           <motion.div key={f.label} initial={{ opacity:0, scale:0.8 }} animate={{ opacity:1, scale:1 }} transition={{ delay:1, type:"spring" }}
-            className="animate-float"
+            className="animate-float hero-badge"
             style={{ position:"absolute", ...f.pos, display:"flex", alignItems:"center", gap:10, padding:"10px 14px", borderRadius:12, background:f.bg, border:`1px solid ${f.bd}`, backdropFilter:"blur(20px)", boxShadow:"0 8px 24px rgba(0,0,0,0.3)" }}>
             <div style={{ width:32, height:32, borderRadius:9, background:"rgba(0,0,0,0.25)", display:"flex", alignItems:"center", justifyContent:"center" }}>{f.icon}</div>
             <div>
@@ -134,7 +134,7 @@ function DashboardPreview() {
   const colors = ["#00c8e0","#4361ee","#7b2d8b","#10b981"];
   return (
     <div>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
+      <div className="dash-preview-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12, marginBottom:20 }}>
         {stats.map((s,i) => (
           <div key={s.label} style={{ background:"rgba(255,255,255,0.02)", border:"1px solid var(--glass-border)", borderRadius:12, padding:"14px 16px" }}>
             <div style={{ fontSize:"0.7rem", color:"var(--ink-muted)", marginBottom:4 }}>{s.label}</div>
@@ -162,7 +162,7 @@ function DashboardPreview() {
                 <div style={{ fontSize:"0.72rem", color:"var(--ink-muted)" }}>{r.form}</div>
               </div>
             </div>
-            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+            <div className="dash-preview-meta" style={{ display:"flex", alignItems:"center", gap:10 }}>
               <span style={{ fontSize:"0.72rem", color:"var(--ink-faint)" }}>{r.time}</span>
               <span className={`badge ${r.sc}`}>{r.status}</span>
             </div>

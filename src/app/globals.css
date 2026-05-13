@@ -545,7 +545,59 @@ body::after {
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 768px) {
+  /* App shell */
   .sidebar { display: none; }
   .app-shell { flex-direction: column; height: auto; }
   .main-content { overflow: visible; }
+
+  /* Typography scale-down */
+  .text-display { font-size: clamp(2rem, 8vw, 3.2rem) !important; }
+  .text-section  { font-size: clamp(1.4rem, 6vw, 2.4rem) !important; }
+
+  /* Navbar — hide desktop links, show hamburger */
+  .nav-links { display: none !important; }
+  .nav-hamburger { display: flex !important; }
+  .nav-mobile-menu {
+    display: flex !important;
+    flex-direction: column;
+    position: fixed;
+    top: 64px; left: 0; right: 0;
+    background: rgba(5,8,14,0.97);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--glass-border);
+    padding: 16px 24px 24px;
+    gap: 8px;
+    z-index: 49;
+  }
+
+  /* Hero floating badges — hide on mobile */
+  .hero-badge { display: none !important; }
+
+  /* Hero dashboard preview grid: 4-col → 2-col */
+  .dash-preview-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+
+  /* Hero preview table rows — hide time/badge on small screens */
+  .dash-preview-meta { display: none !important; }
+
+  /* Section padding */
+  section { padding-left: 16px !important; padding-right: 16px !important; }
+
+  /* Form fill page */
+  .form-fill-wrap { padding: 24px 16px !important; }
+
+  /* Builder panel stacking */
+  .builder-layout { flex-direction: column !important; }
+  .builder-sidebar { width: 100% !important; max-height: 280px; overflow-y: auto; border-right: none !important; border-bottom: 1px solid var(--glass-border); }
+  .builder-canvas { min-height: 60vh; }
+
+  /* Dashboard response cards full-width */
+  .response-grid { grid-template-columns: 1fr !important; }
+
+  /* Cards don't overflow */
+  .card { word-break: break-word; }
+
+  /* Auth modal */
+  .auth-modal-inner { margin: 16px !important; width: calc(100vw - 32px) !important; }
 }
