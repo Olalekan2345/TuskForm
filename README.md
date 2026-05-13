@@ -1,36 +1,103 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# TuskForm — Decentralized Forms on Walrus + Sui
 
-## Getting Started
+> Build forms. Store responses forever. Gate access with wallet addresses. No servers. No databases. No middlemen.
 
-First, run the development server:
+**Live app:** [tuskform.up.railway.app](https://tuskform.up.railway.app)
+
+---
+
+## What it does
+
+TuskForm is a Google Forms alternative where every form definition and every response is stored as an immutable blob on **Walrus** (decentralized storage on Sui). Nothing lives in a traditional database.
+
+| Feature | How it works |
+|---|---|
+| **Form builder** | Drag-and-drop fields (text, email, file upload, checkbox, dropdown, rating, wallet address…) |
+| **Permanent storage** | Form schema + each response stored on Walrus mainnet (~1 year, 52 epochs) |
+| **Wallet-gated fields** | Mark any field "private" — encrypted with **Mysten Seal** (threshold IBE), only the form owner's wallet can decrypt |
+| **File uploads** | Respondents can attach images/files — blobs stored directly on Walrus |
+| **Response dashboard** | Owner connects wallet, dashboard fetches + decrypts all responses on-chain |
+| **Email notifications** | Respondents get a copy; form owner notified on creation — via Brevo SMTP |
+| **Response index** | Upstash Redis maps `formId → [responseBlobId…]` so the dashboard can find all responses without scanning the chain |
+
+---
+
+## Stack
+
+- **Next.js 15** — frontend + API routes
+- **Walrus** (`@mysten/walrus`) — blob storage for forms and responses
+- **Sui** (`@mysten/sui`, `@mysten/dapp-kit`) — wallet connection, transaction signing
+- **Mysten Seal** (`@mysten/seal`) — threshold IBE encryption for private fields
+- **Upstash Redis** — lightweight response index (blob ID lists per form)
+- **Brevo SMTP / Nodemailer** — transactional email (no domain verification needed)
+- **Railway** — deployment
+
+---
+
+## How Seal encryption works
+
+Private fields are encrypted client-side before upload using the Seal SDK:
+
+1. Form owner marks fields as private in the builder
+2. On submit, each private value is encrypted with `SealClient.encrypt({ threshold: 1, packageId, id })` against the Mysten Labs testnet key servers
+3. Encrypted bytes are stored in the Walrus response blob
+4. On the dashboard, owner signs a `SessionKey` transaction, the Seal SDK fetches the decryption key from the key servers, and values are decrypted locally
+
+Package deployed to Sui testnet: `0x3b179126a88104d254ffdea2157e173fe715b0d8acf7306c50b03076fa0fe14b`
+
+---
+
+## Run locally
 
 ```bash
+git clone https://github.com/olalekan2345/tuskform.git
+cd tuskform
+npm install
+cp .env.example .env.local   # fill in your keys
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+**Required env vars:**
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Purpose |
+|---|---|
+| `BREVO_SMTP_USER` | Brevo login email (free at brevo.com) |
+| `BREVO_SMTP_KEY` | Brevo SMTP key |
+| `UPSTASH_REDIS_REST_URL` | Upstash Redis URL |
+| `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis token |
+| `SERVER_WALLET_KEY` | Sui wallet private key (`suiprivkey1…`) — needs SUI + WAL |
+| `NEXT_PUBLIC_WALRUS_AGGREGATOR_URL` | Walrus aggregator endpoint |
+| `NEXT_PUBLIC_SEAL_PACKAGE_ID` | Seal address_gate package on testnet |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Project structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+  app/
+    builder/        # Form builder UI
+    forms/[id]/     # Public form fill page
+    dashboard/      # Owner dashboard (wallet-gated, decryption)
+    analytics/      # Response analytics view
+    api/
+      email/        # Send confirmation emails via Brevo/nodemailer
+      responses/    # Response index (Redis-backed)
+      seal-proxy/   # CORS proxy for Mysten Seal key servers
+      walrus/       # Walrus blob read/write helpers
+  lib/
+    seal.ts         # Seal encrypt/decrypt helpers
+    walrus.ts       # Walrus upload/download helpers
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Demo
 
-## Deploy on Vercel
+[Watch the demo video](https://aggregator.walrus-mainnet.walrus.space/v1/blobs/REPLACE_WITH_BLOB_ID)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Hackathon
+
+Built for the **Walrus Hackathon**. TuskForm demonstrates that a full-featured form platform can run entirely on decentralized infrastructure — Walrus for storage, Sui for identity, Seal for encryption — with no traditional backend database.
