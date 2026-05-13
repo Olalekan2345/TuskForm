@@ -48,8 +48,8 @@ export function Navbar({ onAuthOpen }: { onAuthOpen?: () => void }) {
         backdropFilter: scrolled ? "blur(20px) saturate(180%)" : "none",
         borderBottom: scrolled ? "1px solid var(--glass-border)" : "1px solid transparent",
       }}>
-        {/* Logo */}
-        <Link href="/" onClick={() => setMenuOpen(false)}
+        {/* Logo — navigates home; reloads page if already on "/" */}
+        <Link href="/" onClick={(e) => { setMenuOpen(false); if (window.location.pathname === "/") { e.preventDefault(); window.location.reload(); } }}
           style={{ display:"flex", alignItems:"center", gap:10, textDecoration:"none", flexShrink:0 }}>
           <Image src="/logo.jpg" alt="TuskForm" width={20} height={20} style={{ borderRadius:5, objectFit:"cover" }} />
           <span style={{ fontWeight:800, fontSize:"1.1rem", color:"var(--ink)", letterSpacing:"-0.03em", fontFamily:"var(--font-display)" }}>

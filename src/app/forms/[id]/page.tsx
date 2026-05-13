@@ -8,10 +8,11 @@ import Image from "next/image";
 import { fetchFromWalrus, storeOnWalrus, storeFileOnWalrus } from "@/lib/walrus";
 import { isEncryptedField, encryptField, encryptFieldSeal } from "@/lib/seal";
 import { Button } from "@/components/ui/Button";
+import { useWalletStore } from "@/lib/walletStore";
 import type { FormSchema, FormResponse, FieldResponse } from "@/lib/types";
 import {
   ArrowRight, Check, Star, Upload, Shield, Database,
-  ChevronLeft, Keyboard, AlertCircle, Loader2, Lock
+  ChevronLeft, Keyboard, AlertCircle, Loader2, Lock, Wallet, LogOut, Copy
 } from "lucide-react";
 
 const WalrusWatermark = dynamic(() => import("@/components/WalrusWatermark"), { ssr: false });
@@ -19,6 +20,12 @@ const WalrusWatermark = dynamic(() => import("@/components/WalrusWatermark"), { 
 export default function FormViewerPage() {
   const params    = useParams();
   const blobId    = params.id as string;
+
+  const address        = useWalletStore(s => s.address);
+  const wallets        = useWalletStore(s => s.wallets);
+  const connect        = useWalletStore(s => s.connect);
+  const disconnect     = useWalletStore(s => s.disconnect);
+  const isConnecting   = useWalletStore(s => s.isConnecting);
 
   const [schema, setSchema]       = useState<FormSchema|null>(null);
   const [loading, setLoading]     = useState(true);
@@ -38,6 +45,8 @@ export default function FormViewerPage() {
   const [responseBlobId, setResponseBlobId] = useState<string|null>(null);
   const [respondentEmail, setRespondentEmail] = useState("");
   const [emailSent, setEmailSent] = useState(false);
+  const [walletMenuOpen, setWalletMenuOpen] = useState(false);
+  const [addrCopied, setAddrCopied] = useState(false);
 
   useEffect(() => {
     if (!blobId) return;
@@ -138,6 +147,7 @@ export default function FormViewerPage() {
         formTitle:   schema.title,
         respondedAt: Date.now(),
         responses,
+        ...(address ? { respondentWallet: address } : {}),
       };
 
       const rBlobId = await storeOnWalrus(response);
@@ -200,6 +210,49 @@ export default function FormViewerPage() {
               <Shield size={10}/> Seal
             </div>
           )}
+          {/* Wallet connect — header */}
+          {address ? (
+            <div style={{ position:"relative" }}>
+              <button
+                onClick={() => setWalletMenuOpen(o => !o)}
+                style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, background:"rgba(0,200,224,0.08)", border:"1px solid rgba(0,200,224,0.25)", fontSize:"0.7rem", fontWeight:600, color:"var(--teal-pale)", cursor:"pointer", fontFamily:"monospace" }}>
+                <Wallet size={10}/> {address.slice(0,6)}…{address.slice(-4)}
+              </button>
+              {walletMenuOpen && (
+                <div style={{ position:"absolute", top:"calc(100% + 8px)", right:0, background:"rgba(9,16,31,0.98)", border:"1px solid var(--glass-border)", borderRadius:12, padding:8, zIndex:100, minWidth:160, backdropFilter:"blur(20px)" }}>
+                  <button onClick={() => { navigator.clipboard.writeText(address); setAddrCopied(true); setTimeout(()=>setAddrCopied(false),2000); }}
+                    style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"8px 12px", borderRadius:8, background:"none", border:"none", color:"var(--ink-muted)", fontSize:"0.78rem", cursor:"pointer", textAlign:"left" }}>
+                    <Copy size={12}/> {addrCopied ? "Copied!" : "Copy address"}
+                  </button>
+                  <button onClick={() => { disconnect?.(); setWalletMenuOpen(false); }}
+                    style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"8px 12px", borderRadius:8, background:"none", border:"none", color:"#f87171", fontSize:"0.78rem", cursor:"pointer", textAlign:"left" }}>
+                    <LogOut size={12}/> Disconnect
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div style={{ position:"relative" }}>
+              <button
+                onClick={() => setWalletMenuOpen(o => !o)}
+                style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, background:"rgba(255,255,255,0.04)", border:"1px solid var(--glass-border)", fontSize:"0.7rem", fontWeight:600, color:"var(--ink-muted)", cursor:"pointer" }}>
+                <Wallet size={10}/> Connect wallet
+              </button>
+              {walletMenuOpen && wallets.length > 0 && (
+                <div style={{ position:"absolute", top:"calc(100% + 8px)", right:0, background:"rgba(9,16,31,0.98)", border:"1px solid var(--glass-border)", borderRadius:12, padding:8, zIndex:100, minWidth:180, backdropFilter:"blur(20px)" }}>
+                  <p style={{ fontSize:"0.68rem", color:"var(--ink-faint)", padding:"4px 12px 8px", margin:0 }}>Optional — links your wallet to this response</p>
+                  {wallets.map(w => (
+                    <button key={w.name} onClick={() => { connect?.(w.name); setWalletMenuOpen(false); }}
+                      style={{ display:"flex", alignItems:"center", gap:8, width:"100%", padding:"8px 12px", borderRadius:8, background:"none", border:"none", color:"var(--ink)", fontSize:"0.82rem", cursor:"pointer", textAlign:"left" }}>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {w.icon && <img src={w.icon} alt={w.name} width={18} height={18} style={{ borderRadius:4 }}/>}
+                      {isConnecting === w.name ? "Connecting…" : w.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -231,7 +284,44 @@ export default function FormViewerPage() {
               <Button size="lg" onClick={() => setStep(0)} iconRight={<ArrowRight size={18}/>}>
                 Start · {fields.length} {fields.length===1?"question":"questions"}
               </Button>
-              <div style={{ marginTop:28, display:"flex", alignItems:"center", justifyContent:"center", gap:16, fontSize:"0.75rem", color:"#334155" }}>
+
+              {/* Optional wallet connect on welcome */}
+              <div style={{ marginTop:20 }}>
+                {address ? (
+                  <div style={{ display:"inline-flex", alignItems:"center", gap:8, padding:"8px 16px", borderRadius:20, background:"rgba(0,200,224,0.08)", border:"1px solid rgba(0,200,224,0.2)", fontSize:"0.78rem", color:"var(--teal-pale)" }}>
+                    <Wallet size={13}/> Wallet connected: {address.slice(0,8)}…{address.slice(-4)}
+                    <button onClick={() => disconnect?.()} style={{ background:"none", border:"none", color:"#f87171", cursor:"pointer", fontSize:"0.72rem", padding:0 }}>Disconnect</button>
+                  </div>
+                ) : (
+                  <div>
+                    {wallets.length > 0 ? (
+                      <div>
+                        <p style={{ fontSize:"0.75rem", color:"#475569", marginBottom:10 }}>
+                          <Wallet size={11} style={{ display:"inline", marginRight:4 }}/>
+                          Connect wallet <span style={{ color:"#334155" }}>(optional)</span> — links your identity to this response
+                        </p>
+                        <div style={{ display:"flex", flexWrap:"wrap", justifyContent:"center", gap:8 }}>
+                          {wallets.map(w => (
+                            <button key={w.name} onClick={() => connect?.(w.name)}
+                              style={{ display:"inline-flex", alignItems:"center", gap:7, padding:"6px 14px", borderRadius:20, background:"rgba(255,255,255,0.04)", border:"1px solid var(--glass-border)", color:"var(--ink-muted)", fontSize:"0.78rem", cursor:"pointer" }}>
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              {w.icon && <img src={w.icon} alt={w.name} width={16} height={16} style={{ borderRadius:3 }}/>}
+                              {isConnecting === w.name ? "Connecting…" : w.name}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={{ fontSize:"0.72rem", color:"#334155" }}>
+                        <Wallet size={11} style={{ display:"inline", marginRight:4 }}/>
+                        Install a Sui wallet to optionally link your identity
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop:20, display:"flex", alignItems:"center", justifyContent:"center", gap:16, fontSize:"0.75rem", color:"#334155" }}>
                 <span style={{ display:"flex", alignItems:"center", gap:5 }}><Database size={11} color="#22d3ee"/> Stored on Walrus</span>
                 <span>·</span>
                 <span style={{ display:"flex", alignItems:"center", gap:5 }}><Shield size={11} color="#a78bfa"/> Seal protected</span>
