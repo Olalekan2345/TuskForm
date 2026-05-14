@@ -67,6 +67,8 @@ export default function BuilderPage() {
   const [showShareModal, setShowShareModal] = useState(false);
   const [copiedLink, setCopiedLink]         = useState(false);
   const [emailSent, setEmailSent]           = useState(false);
+  const [admins, setAdmins]         = useState<string[]>([]);
+  const [adminInput, setAdminInput] = useState("");
 
   const address             = useWalletStore(s => s.address);
   const signAndExecuteAsync = useWalletStore(s => s.signAndExecuteAsync);
@@ -84,6 +86,7 @@ export default function BuilderPage() {
         setDesc(schema.description);
         setFields(schema.fields as FormField[]);
         setSelected(schema.fields[0]?.id ?? null);
+        setAdmins(schema.admins ?? []);
       })
       .catch(() => {})
       .finally(() => setEditLoading(false));
@@ -126,6 +129,7 @@ export default function BuilderPage() {
         version: 1,
         encryptionPublicKey,
         sealPackageId,
+        admins: admins.length ? admins : undefined,
       };
       const blobId = await storeOnWalrusWithWallet(schema, address, signAndExecuteAsync, setSaveStatus);
 
@@ -137,6 +141,17 @@ export default function BuilderPage() {
           localStorage.removeItem(`tuskform_ecdhpriv_${tempId}`);
         }
       }
+      // Register co-admins in Redis so they see this form on their dashboard
+      if (admins.length) {
+        await Promise.all(admins.map(adminWallet =>
+          fetch("/api/admin-forms", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ adminWallet, blobId, title, description: desc, createdAt: schema.createdAt, owner: address }),
+          }).catch(() => {})
+        ));
+      }
+
       const key = `tuskform_forms_${address}`;
       const existing: StoredForm[] = JSON.parse(localStorage.getItem(key) || "[]");
       const storedForm: StoredForm = { blobId, title, description: desc, createdAt: schema.createdAt, owner: address };
@@ -439,9 +454,60 @@ export default function BuilderPage() {
                 </div>
               </motion.div>
             ) : (
-              <motion.div key="empty" initial={{ opacity:0 }} animate={{ opacity:1 }} style={{ textAlign:"center", paddingTop:60, color:"#334155" }}>
-                <Settings size={28} style={{ marginBottom:10, opacity:0.3 }} />
-                <p style={{ fontSize:"0.82rem" }}>Select a field to configure</p>
+              <motion.div key="empty" initial={{ opacity:0 }} animate={{ opacity:1 }}>
+                <div style={{ textAlign:"center", paddingTop:40, paddingBottom:24, color:"#334155" }}>
+                  <Settings size={28} style={{ marginBottom:10, opacity:0.3 }} />
+                  <p style={{ fontSize:"0.82rem" }}>Select a field to configure</p>
+                </div>
+
+                {/* Co-admins section */}
+                <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:16 }}>
+                  <div style={{ fontSize:"0.68rem", fontWeight:700, color:"#334155", textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:12, display:"flex", alignItems:"center", gap:6 }}>
+                    <Wallet size={11}/> Co-admins
+                  </div>
+                  <p style={{ fontSize:"0.72rem", color:"#475569", marginBottom:12, lineHeight:1.5 }}>
+                    Add wallet addresses that can view responses for this form on their dashboard.
+                  </p>
+
+                  {/* Existing admins */}
+                  {admins.map(addr => (
+                    <div key={addr} style={{ display:"flex", alignItems:"center", gap:6, padding:"7px 10px", borderRadius:9, background:"rgba(0,200,224,0.06)", border:"1px solid rgba(0,200,224,0.15)", marginBottom:6 }}>
+                      <span style={{ flex:1, fontSize:"0.7rem", color:"var(--teal)", fontFamily:"monospace", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {addr.slice(0,10)}…{addr.slice(-6)}
+                      </span>
+                      <button onClick={() => setAdmins(a => a.filter(x => x !== addr))}
+                        style={{ background:"none", border:"none", cursor:"pointer", color:"#475569", padding:0, display:"flex", flexShrink:0 }}>
+                        <Trash2 size={12}/>
+                      </button>
+                    </div>
+                  ))}
+
+                  {/* Add admin input */}
+                  <div style={{ display:"flex", gap:6, marginTop:8 }}>
+                    <input
+                      className="input"
+                      placeholder="0x wallet address"
+                      value={adminInput}
+                      onChange={e => setAdminInput(e.target.value)}
+                      style={{ flex:1, fontSize:"0.75rem", fontFamily:"monospace", padding:"7px 10px" }}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          const v = adminInput.trim();
+                          if (v && !admins.includes(v)) { setAdmins(a => [...a, v]); setAdminInput(""); }
+                        }
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const v = adminInput.trim();
+                        if (v && !admins.includes(v)) { setAdmins(a => [...a, v]); setAdminInput(""); }
+                      }}
+                      style={{ padding:"7px 10px", borderRadius:9, background:"rgba(0,200,224,0.1)", border:"1px solid rgba(0,200,224,0.2)", color:"var(--teal)", cursor:"pointer", fontSize:"0.78rem", fontWeight:600, flexShrink:0 }}>
+                      <Plus size={13}/>
+                    </button>
+                  </div>
+                  <p style={{ fontSize:"0.68rem", color:"#334155", marginTop:6 }}>Press Enter or + to add</p>
+                </div>
               </motion.div>
             )}
           </AnimatePresence>

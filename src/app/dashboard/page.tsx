@@ -323,12 +323,21 @@ export default function DashboardPage() {
     setEditingNote(false);
   };
 
-  // Load forms
+  // Load forms (own + admin-shared)
   useEffect(() => {
     if (!account?.address) { setMyForms([]); setResponses([]); return; }
     const key = `tuskform_forms_${account.address}`;
-    const stored: StoredForm[] = JSON.parse(localStorage.getItem(key) || "[]");
-    setMyForms(stored);
+    const own: StoredForm[] = JSON.parse(localStorage.getItem(key) || "[]");
+    // Fetch forms this wallet is a co-admin of
+    fetch(`/api/admin-forms?wallet=${account.address}`)
+      .then(r => r.json())
+      .then(({ forms = [] }) => {
+        // Merge, avoiding duplicates (own forms take precedence)
+        const ownIds = new Set(own.map((f: StoredForm) => f.blobId));
+        const shared = (forms as StoredForm[]).filter(f => !ownIds.has(f.blobId));
+        setMyForms([...own, ...shared]);
+      })
+      .catch(() => setMyForms(own));
   }, [account?.address]);
 
   // Fetch responses
@@ -481,6 +490,11 @@ export default function DashboardPage() {
                         <span style={{ fontSize:"0.78rem", color: isActive ? "var(--teal)" : "var(--ink-muted)", flex:1, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", fontWeight: isActive ? 600 : 400 }} title={form.title}>
                           {form.title}
                         </span>
+                        {form.owner !== address && (
+                          <span style={{ fontSize:"0.6rem", background:"rgba(251,191,36,0.1)", color:"#fbbf24", border:"1px solid rgba(251,191,36,0.2)", borderRadius:8, padding:"1px 5px", fontWeight:700, flexShrink:0 }}>
+                            Shared
+                          </span>
+                        )}
                         {formResponseCount > 0 && (
                           <span style={{ fontSize:"0.65rem", background:"rgba(0,200,224,0.12)", color:"var(--teal)", borderRadius:10, padding:"1px 5px", fontWeight:600, flexShrink:0 }}>
                             {formResponseCount}
