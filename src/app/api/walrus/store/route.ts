@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasServerWallet, storeWithServerWallet } from "@/lib/serverWallet";
+import { checkInternalAuth } from "@/lib/internalAuth";
 
 const WALRUS_EPOCHS = process.env.WALRUS_EPOCHS ?? "52";
 
@@ -36,6 +37,8 @@ async function tryPublisher(publisher: string, body: Uint8Array): Promise<string
 }
 
 export async function POST(req: NextRequest) {
+  const authError = checkInternalAuth(req);
+  if (authError) return authError;
   try {
     const body = Buffer.from(await req.text(), "utf-8");
 

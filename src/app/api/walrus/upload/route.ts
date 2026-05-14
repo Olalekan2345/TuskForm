@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasServerWallet, storeWithServerWallet } from "@/lib/serverWallet";
+import { checkInternalAuth } from "@/lib/internalAuth";
 
 const WALRUS_EPOCHS = process.env.WALRUS_EPOCHS ?? "52";
 const MAX_BYTES = 10 * 1024 * 1024; // 10 MiB
@@ -37,6 +38,8 @@ async function tryPublisher(publisher: string, bytes: ArrayBuffer): Promise<stri
 }
 
 export async function POST(req: NextRequest) {
+  const authError = checkInternalAuth(req);
+  if (authError) return authError;
   try {
     const formData = await req.formData();
     const file = formData.get("file") as File | null;

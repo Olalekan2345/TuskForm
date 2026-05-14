@@ -96,7 +96,12 @@ export async function storeFileOnWalrus(
   onProgress?.(10);
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch("/api/walrus/upload", { method: "POST", body: form });
+  const secret = process.env.NEXT_PUBLIC_INTERNAL_API_SECRET;
+  const res = await fetch("/api/walrus/upload", {
+    method: "POST",
+    headers: secret ? { "x-internal-secret": secret } : {},
+    body: form,
+  });
   onProgress?.(90);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: "Upload failed" }));
@@ -107,9 +112,10 @@ export async function storeFileOnWalrus(
 }
 
 export async function storeOnWalrus(data: object): Promise<string> {
+  const secret = process.env.NEXT_PUBLIC_INTERNAL_API_SECRET;
   const res = await fetch("/api/walrus/store", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(secret ? { "x-internal-secret": secret } : {}) },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
