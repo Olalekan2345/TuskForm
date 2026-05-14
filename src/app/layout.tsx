@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   description:
     "Build secure forms, collect smarter feedback, and own your data. The decentralized AI-powered form platform built on Walrus storage and Seal encryption.",
   keywords: ["forms", "feedback", "decentralized", "Web3", "AI", "Walrus", "Seal", "encryption"],
+  icons: {
+    icon: "/logo.jpg",
+    apple: "/logo.jpg",
+  },
   openGraph: {
     title: "TuskForm — Decentralized AI-Powered Forms",
     description: "Build secure forms, collect smarter feedback, own your data.",
