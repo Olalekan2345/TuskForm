@@ -174,6 +174,9 @@ export default function DashboardPage() {
   const [archived,   setArchived]   = useState<Set<string>>(new Set());
   const [editingNote, setEditingNote] = useState(false);
   const [draftNote,   setDraftNote]   = useState("");
+  const [adminInput,  setAdminInput]  = useState("");
+  const [addingAdmin, setAddingAdmin] = useState(false);
+  const [adminAdded,  setAdminAdded]  = useState(false);
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
   // Decrypted values for the currently selected response
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
@@ -394,12 +397,38 @@ export default function DashboardPage() {
   // When selection changes, load note and decrypt sealed fields
   useEffect(() => {
     if (sel) { setDraftNote(notes[sel.responseBlobId] || ""); setEditingNote(false); setShowPriorityMenu(false); }
+    setAdminInput(""); setAdminAdded(false);
     setSealState("idle");
     setSealError(null);
     sealSessionRef.current = null;
     decryptSelected(sel ?? null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sel?.responseBlobId]);
+
+  const addAdmin = async () => {
+    const wallet = adminInput.trim();
+    if (!wallet || !sel) return;
+    setAddingAdmin(true);
+    try {
+      await fetch("/api/admin-forms", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          adminWallet: wallet,
+          blobId: sel.form.blobId,
+          title: sel.form.title,
+          description: sel.form.description,
+          createdAt: sel.form.createdAt,
+          owner: sel.form.owner,
+        }),
+      });
+      setAdminInput("");
+      setAdminAdded(true);
+      setTimeout(() => setAdminAdded(false), 4000);
+    } catch { /* ignore */ } finally {
+      setAddingAdmin(false);
+    }
+  };
 
   const copyFormLink = (blobId: string) => {
     navigator.clipboard.writeText(`${window.location.origin}/forms/${blobId}`);
@@ -833,6 +862,34 @@ export default function DashboardPage() {
                             )}
                           </div>
                         ))}
+                      </div>
+
+                      {/* Add co-admin */}
+                      <div style={{ marginTop:16, padding:"14px 16px", borderRadius:12, background:"rgba(255,255,255,0.02)", border:"1px solid var(--glass-border)" }}>
+                        <div style={{ fontSize:"0.68rem", fontWeight:700, color:"var(--ink-faint)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                          <Wallet size={11}/> Add co-admin to this form
+                        </div>
+                        <div style={{ display:"flex", gap:8 }}>
+                          <input
+                            value={adminInput}
+                            onChange={e => setAdminInput(e.target.value)}
+                            placeholder="0x wallet address"
+                            style={{ flex:1, padding:"7px 10px", borderRadius:9, background:"rgba(255,255,255,0.03)", border:"1px solid var(--glass-border)", color:"var(--ink)", fontSize:"0.75rem", fontFamily:"monospace", outline:"none" }}
+                            onKeyDown={e => { if (e.key === "Enter") addAdmin(); }}
+                          />
+                          <button
+                            onClick={addAdmin}
+                            disabled={addingAdmin || !adminInput.trim()}
+                            style={{ display:"flex", alignItems:"center", gap:5, padding:"7px 12px", borderRadius:9, background:"rgba(0,200,224,0.1)", border:"1px solid rgba(0,200,224,0.2)", color:"var(--teal)", fontSize:"0.78rem", fontWeight:600, cursor:"pointer", flexShrink:0, opacity: !adminInput.trim() ? 0.4 : 1 }}>
+                            {addingAdmin ? <Loader2 size={12} style={{ animation:"spin 1s linear infinite" }}/> : <Plus size={12}/>}
+                            Add
+                          </button>
+                        </div>
+                        {adminAdded && (
+                          <div style={{ display:"flex", alignItems:"center", gap:5, marginTop:8, fontSize:"0.72rem", color:"#34d399" }}>
+                            <CheckCircle2 size={11}/> Admin added — they will see this form on their dashboard.
+                          </div>
+                        )}
                       </div>
 
                       {/* Blob ID */}
