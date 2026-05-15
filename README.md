@@ -94,7 +94,7 @@ src/
 
 ## Demo
 
-[Watch the demo video](https://aggregator.walrus-mainnet.walrus.space/v1/blobs/REPLACE_WITH_BLOB_ID)
+[Watch the demo video](https://tuskform-production.up.railway.app/api/download?blobId=lX9TPTOqkzunYeWdAb5qBRKFMZmzgdPv_CX8_uYQ_BE&fileName=TuskForm%20Demo%20Video(720P_HD).mp4&fileType=video%2Fmp4&inline=1)
 
 ---
 
