@@ -3,24 +3,24 @@
 // The wallet needs SUI (gas) and WAL (storage) tokens.
 
 const WALRUS_NETWORK = (process.env.WALRUS_NETWORK ?? "mainnet") as "mainnet" | "testnet";
-const SUI_GRPC_URL =
+const SUI_RPC_URL =
   WALRUS_NETWORK === "mainnet"
     ? "https://fullnode.mainnet.sui.io:443"
     : "https://fullnode.testnet.sui.io:443";
 const WALRUS_EPOCHS = parseInt(process.env.WALRUS_EPOCHS ?? "52", 10);
 
 let _walrusClient: import("@mysten/walrus").WalrusClient | null = null;
-let _suiClient: import("@mysten/sui/grpc").SuiGrpcClient | null = null;
+let _suiClient: import("@mysten/sui/jsonRpc").SuiJsonRpcClient | null = null;
 
 async function getClients() {
   if (!_walrusClient || !_suiClient) {
     const { WalrusClient } = await import("@mysten/walrus");
-    const { SuiGrpcClient } = await import("@mysten/sui/grpc");
-    _suiClient = new SuiGrpcClient({ network: WALRUS_NETWORK, baseUrl: SUI_GRPC_URL });
+    const { SuiJsonRpcClient } = await import("@mysten/sui/jsonRpc");
+    _suiClient = new SuiJsonRpcClient({ network: WALRUS_NETWORK, url: SUI_RPC_URL });
     _walrusClient = new WalrusClient({
       network: WALRUS_NETWORK,
       suiClient: _suiClient,
-      storageNodeClientOptions: { timeout: 12_000 },
+      storageNodeClientOptions: { timeout: 60_000 },
     });
   }
   return _walrusClient!;
